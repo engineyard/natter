@@ -1,0 +1,43 @@
+CC = @CC@
+CFLAGS = @CFLAGS@ -Wall
+CPPFLAGS = @CPPFLAGS@
+LDFLAGS = @LDFLAGS@
+LIBS = @LIBS@
+
+ERL_ROOT_DIR = @ERLANG_ROOT_DIR@
+ERL_EI_DIR = @ERLANG_LIB_DIR_erl_interface@
+ERL_CFLAGS = -I$(ERL_EI_DIR)/include -I$(ERL_ROOT_DIR)/usr/include
+ERL_LIBS = -L$(ERL_EI_DIR)/lib -lerl_interface -lei
+
+ifeq ($(shell uname),Darwin)
+DYNAMIC_LIB_CFLAGS = -fPIC -bundle -flat_namespace -undefined suppress
+else
+DYNAMIC_LIB_CFLAGS = -fpic -shared
+endif
+
+SO_DIR=priv/lib
+NATTER_EXPAT=${SO_DIR}/natter_expat.so
+
+all: compile-native-driver compile-erlang
+
+tests: all
+	cd tests;erl -make;cd $(cwd)
+	erl -pz ebin -eval "test_suite:test()." -noshell -s init stop
+
+compile-erlang:
+	cd src;erl -make;cd $(cwd)
+
+compile-native-driver: ${SO_DIR} ${NATTER_EXPAT}
+
+${SO_DIR}:
+	mkdir -p $@
+
+${NATTER_EXPAT}: src/natter_expat.c
+	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) $(ERL_LIBS) $(ERL_CFLAGS) \
+	$(DYNAMIC_LIB_CFLAGS) $^ -o $@
+
+clean:
+	rm -rf priv/lib ebin/*.beam
+
+distclean: clean
+	rm -rf Makefile autom4te.cache config.log config.status
