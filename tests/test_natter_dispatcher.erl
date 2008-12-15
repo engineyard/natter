@@ -22,13 +22,13 @@ registration_test_() ->
                Pid end,
     fun(P) ->
         exit(P, shutdown) end,
-    [?_assertMatch(ok, natter_dispatcher:register_exchange(natterd, "foo@localhost", self())),
-     ?_assertMatch(ok, natter_dispatcher:unregister_exchange(natterd, "foo@localhost")),
+    [?_assertMatch(ok, natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())),
+     ?_assertMatch(ok, natter_dispatcher:unregister_exchange(natterd, "iq", "foo@localhost")),
      fun() ->
          natter_dispatcher:clear(natterd),
-         ?assertMatch(ok, natter_dispatcher:register_exchange(natterd, "foo@localhost", self())),
+         ?assertMatch(ok, natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())),
          ?assertMatch({error, already_registered, _To, _CP},
-                      natter_dispatcher:register_exchange(natterd, "foo@localhost", self())) end]}].
+                      natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())) end]}].
 
 simple_routing_test_() ->
   [{setup, fun() ->
@@ -49,7 +49,8 @@ simple_routing_test_() ->
         after 2000 ->
             throw({error, timeout})
         end,
-        natter_dispatcher:unregister_exchange(natterd, "bar@localhost") end]}].
+        natter_dispatcher:unregister_exchange(natterd, "iq", "bar@localhost") end]}].
+
 async_routing_test_() ->
   [{setup, fun() ->
                {ok, Pid} = natter_dispatcher:start_link(),
@@ -66,8 +67,8 @@ async_routing_test_() ->
         after 2000 ->
             throw({error, timeout})
         end,
-        natter_dispatcher:unregister_exchange(natterd, "foo@localhost"),
-        natter_dispatcher:unregister_exchange(natterd, "bar@localhost") end]}].
+        natter_dispatcher:unregister_exchange(natterd, "iq", "foo@localhost"),
+        natter_dispatcher:unregister_exchange(natterd, "iq", "bar@localhost") end]}].
 
 blocking_routing_test_() ->
   [{setup, fun() ->
@@ -104,7 +105,7 @@ setup_blocking_pair(Owner, ReqStanza, ReplyStanza) ->
                          after 2000 ->
                              Owner ! {error, timeout}
                          end end),
-  natter_dispatcher:register_exchange(natterd, "bar@localhost", RecvWorker).
+  natter_dispatcher:register_exchange(natterd, "iq", "bar@localhost", RecvWorker).
 
 setup_async_pair(Owner, ReqStanza, ReplyStanza) ->
   SendWorker = spawn(fun() ->
@@ -116,7 +117,7 @@ setup_async_pair(Owner, ReqStanza, ReplyStanza) ->
                          after 2000 ->
                              Owner ! {error, timeout}
                          end end),
-  natter_dispatcher:register_exchange(natterd, "foo@localhost", SendWorker),
+  natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", SendWorker),
   ReplyWorker = spawn(fun() ->
                           receive
                             {packet, S} ->
@@ -129,11 +130,11 @@ setup_async_pair(Owner, ReqStanza, ReplyStanza) ->
                           after 2000 ->
                               Owner ! {error, timeout}
                           end end),
-  natter_dispatcher:register_exchange(natterd, "bar@localhost", ReplyWorker).
+  natter_dispatcher:register_exchange(natterd, "iq", "bar@localhost", ReplyWorker).
 
 setup_receiving_worker(Owner, Stanza) ->
   Worker = worker(Owner, Stanza),
-  ?assertMatch(ok, natter_dispatcher:register_exchange(natterd, "bar@localhost", Worker)),
+  ?assertMatch(ok, natter_dispatcher:register_exchange(natterd, "iq", "bar@localhost", Worker)),
   Worker.
 
 worker(Owner, Stanza) ->

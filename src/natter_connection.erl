@@ -7,8 +7,8 @@
 -include("typespecs.hrl").
 
 %% API
--export([start_link/1, close/1, register_default_exchange/2, unregister_default_exchange/1]).
--export([register_exchange/3, unregister_exchange/2, raw_send/2, send_iq/5, send_wait_iq/5]).
+-export([start_link/1, close/1, register_default_exchange/3, unregister_default_exchange/2]).
+-export([register_exchange/4, unregister_exchange/3, raw_send/2, send_iq/5, send_wait_iq/5]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -36,25 +36,25 @@ close(ConnectionPid) ->
   exit(ConnectionPid, shutdown),
   ok.
 
--spec(register_default_exchange/2 :: (ConnectionPid :: pid(), SinkPid :: pid()) -> ok | natter_error()).
-register_default_exchange(ConnectionPid, SinkPid) ->
+-spec(register_default_exchange/3 :: (ConnectionPid :: pid(), PacketType :: string(), SinkPid :: pid()) -> ok | natter_error()).
+register_default_exchange(ConnectionPid, PacketType, SinkPid) ->
   DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
-  natter_dispatcher:register_exchange(DispatcherPid, default, SinkPid).
+  natter_dispatcher:register_exchange(DispatcherPid, PacketType, default, SinkPid).
 
--spec(unregister_default_exchange/1 :: (ConnectionPid :: pid()) -> ok).
-unregister_default_exchange(ConnectionPid) ->
+-spec(unregister_default_exchange/2 :: (ConnectionPid :: pid(), PacketType :: string()) -> ok).
+unregister_default_exchange(ConnectionPid, PacketType) ->
   DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
-  natter_dispatcher:unregister_exchange(DispatcherPid, default).
+  natter_dispatcher:unregister_exchange(DispatcherPid, PacketType, default).
 
--spec(register_exchange/3 :: (ConnectionPid :: pid(), TargetJid :: string(), SinkPid :: pid()) -> ok | natter_error()).
-register_exchange(ConnectionPid, TargetJid, SinkPid) when is_list(TargetJid) ->
+-spec(register_exchange/4 :: (ConnectionPid :: pid(), PacketType :: string(), TargetJid :: string(), SinkPid :: pid()) -> ok | natter_error()).
+register_exchange(ConnectionPid, PacketType, TargetJid, SinkPid) when is_list(TargetJid) ->
   DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
-  natter_dispatcher:register_exchange(DispatcherPid, TargetJid, SinkPid).
+  natter_dispatcher:register_exchange(DispatcherPid, PacketType, TargetJid, SinkPid).
 
--spec(unregister_exchange/2 :: (ConnectionPid :: pid(), TargetJid :: string()) -> 'ok').
-unregister_exchange(ConnectionPid, TargetJid) when is_list(TargetJid) ->
+-spec(unregister_exchange/3 :: (ConnectionPid :: pid(), PacketType :: string(), TargetJid :: string()) -> 'ok').
+unregister_exchange(ConnectionPid, PacketType, TargetJid) when is_list(TargetJid) ->
   DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
-  natter_dispatcher:unregister_exchange(DispatcherPid, TargetJid).
+  natter_dispatcher:unregister_exchange(DispatcherPid, PacketType, TargetJid).
 
 -spec(raw_send/2 :: (ConnectionPid :: pid(), Packet :: string()) -> 'ok').
 raw_send(ConnectionPid, Packet) ->

@@ -15,8 +15,8 @@
          packetizer}).
 
 %% API
--export([start_link/0, start_link/1, register_temporary_exchange/3, register_exchange/3, unregister_exchange/2]).
--export([dispatch/2, get_packetizer/1, send_and_wait/2, clear/1]).
+-export([start_link/0, start_link/1, register_temporary_exchange/4, register_exchange/4]).
+-export([unregister_exchange/3, dispatch/2, get_packetizer/1, send_and_wait/2, clear/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -34,17 +34,17 @@ start_link(Config) ->
 clear(ServerPid) ->
   gen_server:call(ServerPid, clear).
 
--spec(register_exchange/3 :: (ServerPid :: pid(), TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
-register_exchange(ServerPid, TargetJid, ConsumerPid) ->
-  gen_server:call(ServerPid, {register_exchange, TargetJid, ConsumerPid}).
+-spec(register_exchange/4 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
+register_exchange(ServerPid, PacketType, TargetJid, ConsumerPid) ->
+  gen_server:call(ServerPid, {register_exchange, PacketType, TargetJid, ConsumerPid}).
 
--spec(register_temporary_exchange/3 :: (ServerPid :: pid(), TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
-register_temporary_exchange(ServerPid, TargetJid, ConsumerPid) ->
-  gen_server:call(ServerPid, {register_temp_exchange, TargetJid, ConsumerPid}).
+-spec(register_temporary_exchange/4 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
+register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid) ->
+  gen_server:call(ServerPid, {register_temp_exchange, PacketType, TargetJid, ConsumerPid}).
 
--spec(unregister_exchange/2 :: (ServerPid :: pid(), TargetJid :: string() | 'default') -> 'ok').
-unregister_exchange(ServerPid, TargetJid) ->
-  gen_server:call(ServerPid, {unregister_exchange, TargetJid}).
+-spec(unregister_exchange/3 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default') -> 'ok').
+unregister_exchange(ServerPid, PacketType, TargetJid) ->
+  gen_server:call(ServerPid, {unregister_exchange, PacketType, TargetJid}).
 
 -spec(get_packetizer/1 :: (ServerPid :: pid()) -> {ok, pid()}).
 get_packetizer(ServerPid) ->
@@ -57,9 +57,9 @@ dispatch(ServerPid, Stanza) ->
 -spec(send_and_wait/2 :: (ServerPid :: pid(), Stanza :: tuple() | string() ) -> {'ok', parsed_xml()} | {'error', 'timeout'}).
 send_and_wait(ServerPid, Stanza) when is_list(Stanza) ->
   send_and_wait(ServerPid, natter_parser:parse(Stanza));
-send_and_wait(ServerPid, {xmlelement, _, Attrs, _} = Stanza) ->
+send_and_wait(ServerPid, {xmlelement, PacketType, Attrs, _} = Stanza) ->
   To = extract_routable_jid("to", Attrs),
-  case register_temporary_exchange(ServerPid, To, self()) of
+  case register_temporary_exchange(ServerPid, PacketType, To, self()) of
     {error, already_registered} ->
       timer:sleep(100),
       send_and_wait(ServerPid, Stanza);
@@ -101,33 +101,36 @@ handle_call({send, Stanza}, _From, State) ->
 handle_call(get_packetizer, _From, State) ->
   {reply, State#state.packetizer, State};
 
-handle_call({register_temp_exchange, TargetJid, ConsumerPid}, _From, State) ->
-  [Reply, NewState] = case dict:find(TargetJid, State#state.temp_routes) of
+handle_call({register_temp_exchange, PacketType, TargetJid, ConsumerPid}, _From, State) ->
+  Key = make_exchange_key(PacketType, TargetJid),
+  [Reply, NewState] = case dict:find(Key, State#state.temp_routes) of
                         {ok, _} ->
                           [{error, already_registered}, State];
                         error ->
-                          [ok, State#state{temp_routes=dict:store(TargetJid, ConsumerPid, State#state.temp_routes)}]
+                          [ok, State#state{temp_routes=dict:store(Key, ConsumerPid, State#state.temp_routes)}]
                       end,
   {reply, Reply, NewState};
 
-handle_call({register_exchange, TargetJid, ConsumerPid}, _From, State) ->
-  [Reply, NewState] = case dict:find(TargetJid, State#state.routes) of
+handle_call({register_exchange, PacketType, TargetJid, ConsumerPid}, _From, State) ->
+  Key = make_exchange_key(PacketType, TargetJid),
+  [Reply, NewState] = case dict:find(Key, State#state.routes) of
                      {ok, CP} ->
                        [{error, already_registered, TargetJid, CP}, State];
                      error ->
-                       [ok, State#state{routes=dict:store(TargetJid, ConsumerPid, State#state.routes)}]
+                       [ok, State#state{routes=dict:store(Key, ConsumerPid, State#state.routes)}]
                    end,
   {reply, Reply, NewState};
 
-handle_call({unregister_exchange, TargetJid}, _From, State) ->
-  {reply, ok, State#state{routes=dict:erase(TargetJid, State#state.routes)}};
+handle_call({unregister_exchange, PacketType, TargetJid}, _From, State) ->
+  Key = make_exchange_key(PacketType, TargetJid),
+  {reply, ok, State#state{routes=dict:erase(Key, State#state.routes)}};
 
 handle_call(_Request, _From, State) ->
   {reply, ignored, State}.
 
-handle_cast({dispatch, {xmlelement, _, Attrs, _}=Stanza}, State) ->
+handle_cast({dispatch, {xmlelement, PacketType, Attrs, _}=Stanza}, State) ->
   Jid = extract_routable_jid("from", Attrs),
-  NewState = case find_target(Jid, State) of
+  NewState = case find_target(PacketType, Jid, State) of
                {{ok, ConsumerPid}, S} ->
                  ConsumerPid ! {packet, Stanza},
                  S;
@@ -184,8 +187,8 @@ extract_routable_jid(FieldName, Attrs) ->
       Value
   end.
 
-find_target(Jid, State) ->
-  RouteNames = [Jid],
+find_target(PacketType, Jid, State) ->
+  RouteNames = [make_exchange_key(PacketType, Jid)],
   case find_registered_route(temp_routes, RouteNames, State) of
     {error, State} ->
       find_registered_route(routes, lists:reverse([default|RouteNames]), State);
@@ -223,3 +226,9 @@ prepare_stanza({xmlelement, Name, Attrs, SubEls}, Config) ->
                    Attrs
                end,
   {xmlelement, Name, FinalAttrs, SubEls}.
+
+make_exchange_key(PacketType, TargetJid) when is_atom(TargetJid) ->
+  make_exchange_key(PacketType, atom_to_list(TargetJid));
+
+make_exchange_key(PacketType, TargetJid) when is_list(TargetJid) ->
+  lists:flatten([TargetJid, "|", PacketType]).
