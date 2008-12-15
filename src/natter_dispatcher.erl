@@ -191,7 +191,7 @@ find_target(PacketType, Jid, State) ->
   RouteNames = [make_exchange_key(PacketType, Jid)],
   case find_registered_route(temp_routes, RouteNames, State) of
     {error, State} ->
-      find_registered_route(routes, lists:reverse([default|RouteNames]), State);
+      find_registered_route(routes, lists:reverse([make_exchange_key("all", default)|RouteNames]), State);
     Route ->
       Route
   end.
