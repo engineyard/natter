@@ -132,10 +132,15 @@ build_child_specs(Config) ->
     undefined ->
       CS1;
     LogFile ->
-      lists:reverse([{natter_logger,
-                      {natter_logger, start_link, [LogFile]},
-                      transient,
-                      5,
-                      worker,
-                      [natter_logger]}|CS1])
+      case erlang:whereis(natter_logger) of
+        undefined ->
+          lists:reverse([{natter_logger,
+                          {natter_logger, start_link, [LogFile]},
+                          transient,
+                          5,
+                          worker,
+                          [natter_logger]}|CS1]);
+        _ ->
+          CS1
+      end
   end.
