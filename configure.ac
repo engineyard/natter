@@ -1,7 +1,15 @@
-#                                               -*- Autoconf -*-
-# Process this file with autoconf to produce a configure script.
+# -*- Autoconf -*-
+
+# Required versions
 AC_PREREQ(2.61)
+
+# Intialization
 AC_INIT(natter, 0.1.0)
+AM_INIT_AUTOMAKE([-Wall -Werror foreign])
+ifdef([LT_INIT], [LT_INIT], [AC_PROG_LIBTOOL])
+AC_SUBST([LIBTOOL_DEPS])
+
+# Check our source distribution
 AC_CONFIG_SRCDIR([src/natter_expat.c])
 
 # Checks for programs.
@@ -21,6 +29,7 @@ AC_CHECK_FUNCS([memmove memset])
 
 # Erlang stuff
 AC_ERLANG_SUBST_ROOT_DIR
+AC_ERLANG_SUBST_INSTALL_LIB_DIR
 AC_ERLANG_CHECK_LIB(erl_interface,
                     [], [AC_MSG_FAILURE(cannot find erl_interface, [1])])
 
@@ -29,5 +38,6 @@ AC_CHECK_LIB(expat, XML_ParserCreate,
              [], [AC_MSG_FAILURE(cannot find libexpat, [1])])
 
 # Output files
-AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile
+                 src/Makefile])
 AC_OUTPUT
