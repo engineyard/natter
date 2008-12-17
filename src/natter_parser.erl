@@ -12,7 +12,7 @@ parse(XML) when is_list(XML) ->
   natter_util:load_xml_driver(),
   DriverPort = open_port({spawn, natter_expat}, [binary]),
   try parse(DriverPort, [], CXML)
-  catch _:Error ->
+  catch Error ->
       {error, Error}
   after
     close(DriverPort)
@@ -97,7 +97,7 @@ handle_event({cdata, CData}, Stack) ->
   case Stack of
     %% Append contiguous CDATA blocks together
     [{xmlelement, Name, Attrs, [{xmlcdata, PrevCData}|SubEls]}|T] ->
-      [{xmlelement, Name, Attrs, [{xmlcdata, erlang:concat_binary(PrevCData, CData)}|SubEls]}|T];
+      [{xmlelement, Name, Attrs, [{xmlcdata, erlang:concat_binary([PrevCData, CData])}|SubEls]}|T];
     %% Create a new CDATA block
     [{xmlelement, Name, Attrs, SubEls}|T] ->
       [{xmlelement, Name, Attrs, [{xmlcdata, CData}|SubEls]}|T];
