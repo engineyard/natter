@@ -81,7 +81,7 @@ send_wait_iq(ConnectionPid, Type, PacketId, To, Packet) when Type =:= "set";
         "result" ->
           Result;
         _ ->
-          throw({illegal_xmpp_reply, Result})
+          {error, {illegal_xmpp_reply, Result}}
       end;
     Err ->
       Err
