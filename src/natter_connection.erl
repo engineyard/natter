@@ -39,8 +39,10 @@ start_link(Config) ->
       {auth, ok} ->
         {ok, Pid};
       {auth, err} ->
+        close(Pid),
         {error, auth_error}
     after 60000 ->
+        close(Pid),
         {error, auth_error}
     end
   catch
