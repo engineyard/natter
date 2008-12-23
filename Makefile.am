@@ -1,4 +1,4 @@
-SUBDIRS = src
+SUBDIRS = src tests
 
 dist-hook:
 	mkdir $(distdir)/ebin
