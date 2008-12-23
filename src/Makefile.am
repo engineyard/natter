@@ -2,6 +2,7 @@ app = natter
 appdir = $(ERLANG_INSTALL_LIB_DIR)/$(app)-$(VERSION)
 
 erl_files = $(wildcard *.erl)
+hrl_files = $(wildcard *.hrl)
 beam_files = $(erl_files:%.erl=../ebin/%.beam)
 ebindir = $(appdir)/ebin
 ebin_DATA = $(beam_files)
@@ -16,6 +17,7 @@ natter_expat_la_LDFLAGS = -fPIC -shared -module -avoid-version \
 	-L$(erl_ei_dir)/lib -lerl_interface -lei -lexpat
 
 CLEANFILES = $(ebin_DATA) $(driver_LTLIBRARIES)
+EXTRA_DIST = $(erl_files) $(hrl_files)
 
 ERLCFLAGS = @ERLCFLAGS@ +warn_obsolete_guard +warn_unused_import \
 	+warn_shadow_vars +warn_export_vars +debug_info
