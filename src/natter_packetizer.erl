@@ -71,9 +71,14 @@ handle_cast(reset, State) ->
   {noreply, State#state{buffer=[]}};
 
 handle_cast({send_packet, Packet}, State) ->
-  ok = gen_tcp:send(State#state.socket, Packet),
-  natter_logger:log(?FILE, ?LINE, ["Sent: ", Packet]),
-  {noreply, State};
+  case gen_tcp:send(State#state.socket, Packet) of
+    ok ->
+      natter_logger:log(?FILE, ?LINE, ["Sent: ", Packet]),
+      {noreply, State};
+    {error, Reason} ->
+      natter_logger:log(?FILE, ?LINE, ["Fatal Error", Reason]),
+      {stop, Reason, State}
+  end;
 
 handle_cast(_Msg, State) ->
   {noreply, State}.
@@ -101,13 +106,6 @@ handle_info({tcp, Socket, Data}, State) ->
 handle_info(_Info, State) ->
   {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% Function: terminate(Reason, State) -> void()
-%% Description: This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any necessary
-%% cleaning up. When it returns, the gen_server terminates with Reason.
-%% The return value is ignored.
-%%--------------------------------------------------------------------
 terminate(_Reason, State) ->
   case State#state.socket of
     undefined ->
@@ -118,10 +116,6 @@ terminate(_Reason, State) ->
       gen_tcp:close(Socket)
   end.
 
-%%--------------------------------------------------------------------
-%% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% Description: Convert process state when code is changed
-%%--------------------------------------------------------------------
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
@@ -150,8 +144,21 @@ reset_socket(Socket) ->
 
 
 open_connection(Config) ->
-  Host = proplists:get_value(host, Config, "localhost"),
-  Port = proplists:get_value(port, Config, 5222),
+  io:format("Config: ~p~n", [Config]),
+  Hosts = case proplists:get_value(service, Config) of
+            undefined ->
+              H = proplists:get_value(host, Config, "localhost"),
+              P = proplists:get_value(port, Config, 5222),
+              [{H, P}];
+            {Service, Domain} ->
+              case natter_srv:resolve_service(Service, Domain) of
+                {ok, Entries} ->
+                  io:format("Entries: ~p~n", [Entries]),
+                  Entries;
+                Error ->
+                  throw({config_error, Error})
+              end
+          end,
   User = proplists:get_value(user, Config),
   Password = proplists:get_value(password, Config),
   case User =:= undefined orelse Password =:= undefined of
@@ -162,26 +169,32 @@ open_connection(Config) ->
   end,
   case proplists:get_value(ssl, Config) of
     undefined ->
-      tcp_connect(Host, Port);
+      tcp_connect(Hosts);
     false ->
-      tcp_connect(Host, Port);
+      tcp_connect(Hosts);
     true ->
-      ssl_connect(Host, Port);
+      ssl_connect(Hosts);
     Oops ->
       throw({badarg, Oops})
   end.
 
-ssl_connect(_Host, _Port) ->
+ssl_connect(_) ->
   exit(self(), unsupported_connect_type).
 
-tcp_connect(Host, Port) ->
-  {ok, Sock} = gen_tcp:connect(Host, Port, [list, {keepalive, true},
+tcp_connect([{Host, Port}|T]) ->
+  case gen_tcp:connect(Host, Port, [list, {keepalive, true},
                                             {nodelay, true},
                                             {active, once},
                                             {packet, 0},
-                                            {reuseaddr, true}]),
-  gen_tcp:controlling_process(Sock, self()),
-  {ok, Sock}.
+                                            {reuseaddr, true}]) of
+    {ok, Sock} ->
+      gen_tcp:controlling_process(Sock, self()),
+      {ok, Sock};
+    _ ->
+      tcp_connect(T)
+  end;
+tcp_connect([]) ->
+  {error, no_hosts_available}.
 
 strip_xml_decl(Buffer) ->
   case string:str(Buffer, "?>") of

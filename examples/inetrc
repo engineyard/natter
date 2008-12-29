@@ -1,0 +1,4 @@
+%% This file is required in order for SRV
+%% resolution to work.
+{file, resolv, "/etc/resolv.conf"}.
+{lookup, [dns]}.
