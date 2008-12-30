@@ -87,21 +87,22 @@ handle_info({tcp, Socket, Data}, State) ->
   natter_logger:log(?FILE, ?LINE, ["Received: ", Data]),
   reset_socket(Socket),
   S1 = buffer_data(Data, State),
-  NewState = case string:str(S1#state.buffer, "<stream:stream") of
-               0 ->
-                 case natter_packet_engine:analyze(S1#state.buffer) of
-                   {[], _} ->
-                     S1;
-                   {Stanzas, NewBuffer} ->
-                     lists:foreach(fun(Stanza) -> dispatch(Stanza, S1) end, Stanzas),
-                     S1#state{buffer=NewBuffer}
-                 end;
-               _ ->
-                 dispatch(strip_xml_decl(S1#state.buffer), S1),
-                 S1#state{buffer=[]}
-             end,
-  {noreply, NewState};
-
+  case classify(S1#state.buffer) of
+    start_stream ->
+      dispatch(strip_xml_decl(S1#state.buffer), S1),
+      {noreply, S1#state{buffer=[]}};
+    end_stream ->
+      %% Exit when the end of the XMPP stream is detected
+      {stop, stream_end, S1#state{buffer=[]}};
+    data ->
+      case natter_packet_engine:analyze(S1#state.buffer) of
+        {[], _} ->
+          {noreply, S1};
+        {Stanzas, NewBuffer} ->
+          lists:foreach(fun(Stanza) -> dispatch(Stanza, S1) end, Stanzas),
+          {noreply, S1#state{buffer=NewBuffer}}
+      end
+  end;
 
 handle_info(_Info, State) ->
   {noreply, State}.
@@ -120,6 +121,19 @@ code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
 %% Internal functions
+classify(Buffer) ->
+  case string:str(Buffer, "<stream:stream") of
+    0 ->
+      case string:str(Buffer, "</stream:stream") of
+        0 ->
+          data;
+        _ ->
+          end_stream
+      end;
+    _ ->
+      start_stream
+  end.
+
 dispatch(Stanza, State) ->
   if
     State#state.dispatcher =:= undefined ->
@@ -144,7 +158,6 @@ reset_socket(Socket) ->
 
 
 open_connection(Config) ->
-  io:format("Config: ~p~n", [Config]),
   Hosts = case proplists:get_value(service, Config) of
             undefined ->
               H = proplists:get_value(host, Config, "localhost"),
