@@ -61,7 +61,7 @@ register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid) ->
 
 -spec(unregister_exchange/3 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default') -> 'ok').
 unregister_exchange(ServerPid, PacketType, TargetJid) ->
-  gen_server:call(ServerPid, {unregister_exchange, PacketType, TargetJid}).
+  gen_server:call(ServerPid, {unregister_exchange, PacketType, TargetJid, self()}).
 
 -spec(get_packetizer/1 :: (ServerPid :: pid()) -> {ok, pid()}).
 get_packetizer(ServerPid) ->
@@ -121,26 +121,32 @@ handle_call(get_packetizer, _From, State) ->
 handle_call({register_temp_exchange, PacketType, TargetJid, ConsumerPid}, _From, State) ->
   Key = make_exchange_key(PacketType, TargetJid),
   [Reply, NewState] = case dict:find(Key, State#state.temp_routes) of
-                        {ok, _} ->
-                          [{error, already_registered}, State];
+                        {ok, Pids} ->
+                          [ok, State#state{temp_routes=dict:store(Key, [ConsumerPid|Pids], State#state.temp_routes)}];
                         error ->
-                          [ok, State#state{temp_routes=dict:store(Key, ConsumerPid, State#state.temp_routes)}]
+                          [ok, State#state{temp_routes=dict:store(Key, [ConsumerPid], State#state.temp_routes)}]
                       end,
   {reply, Reply, NewState};
 
 handle_call({register_exchange, PacketType, TargetJid, ConsumerPid}, _From, State) ->
   Key = make_exchange_key(PacketType, TargetJid),
   [Reply, NewState] = case dict:find(Key, State#state.routes) of
-                     {ok, CP} ->
-                       [{error, already_registered, TargetJid, CP}, State];
+                     {ok, Pids} ->
+                          [ok, State#state{routes=dict:store(Key, [ConsumerPid|Pids], State#state.routes)}];
                      error ->
-                       [ok, State#state{routes=dict:store(Key, ConsumerPid, State#state.routes)}]
+                       [ok, State#state{routes=dict:store(Key, [ConsumerPid], State#state.routes)}]
                    end,
   {reply, Reply, NewState};
 
-handle_call({unregister_exchange, PacketType, TargetJid}, _From, State) ->
+handle_call({unregister_exchange, PacketType, TargetJid, Consumer}, _From, State) ->
   Key = make_exchange_key(PacketType, TargetJid),
-  {reply, ok, State#state{routes=dict:erase(Key, State#state.routes)}};
+  FinalState = case dict:find(Key, State#state.routes) of
+                {ok, Pids} ->
+                   State#state{routes=dict:store(Key, lists:delete(Consumer, Pids), State#state.routes)};
+                error ->
+                   State
+               end,
+  {reply, ok, FinalState};
 
 handle_call(_Request, _From, State) ->
   {reply, ignored, State}.
@@ -148,8 +154,8 @@ handle_call(_Request, _From, State) ->
 handle_cast({dispatch, {xmlelement, PacketType, Attrs, _}=Stanza}, State) ->
   Jid = extract_routable_jid("from", Attrs),
   NewState = case find_target(PacketType, Jid, State) of
-               {{ok, ConsumerPid}, S} ->
-                 ConsumerPid ! {packet, Stanza},
+               {{ok, Routes}, S} ->
+                 lists:foreach(fun(R) -> R ! {packet, Stanza} end, Routes),
                  S;
                {error, S} ->
                  natter_logger:log(?FILE, ?LINE, ["Ignoring unroutable packet: ",
@@ -161,22 +167,10 @@ handle_cast({dispatch, {xmlelement, PacketType, Attrs, _}=Stanza}, State) ->
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% Function: handle_info(Info, State) -> {noreply, State} |
-%%                                       {noreply, State, Timeout} |
-%%                                       {stop, Reason, State}
-%% Description: Handling all non call/cast messages
-%%--------------------------------------------------------------------
+
 handle_info(_Info, State) ->
   {noreply, State}.
 
-%%--------------------------------------------------------------------
-%% Function: terminate(Reason, State) -> void()
-%% Description: This function is called by a gen_server when it is about to
-%% terminate. It should be the opposite of Module:init/1 and do any necessary
-%% cleaning up. When it returns, the gen_server terminates with Reason.
-%% The return value is ignored.
-%%--------------------------------------------------------------------
 terminate(Reason, State) ->
   case State#state.packetizer =:= undefined of
     true ->
@@ -186,16 +180,11 @@ terminate(Reason, State) ->
   end,
   ok.
 
-%%--------------------------------------------------------------------
-%% Func: code_change(OldVsn, State, Extra) -> {ok, NewState}
-%% Description: Convert process state when code is changed
-%%--------------------------------------------------------------------
 code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
-%%--------------------------------------------------------------------
-%%% Internal functions
-%%--------------------------------------------------------------------
+%% Internal functions
+
 extract_routable_jid(FieldName, Attrs) ->
   case proplists:get_value(FieldName, Attrs) of
     undefined ->
@@ -209,8 +198,8 @@ find_target(PacketType, Jid, State) ->
   case find_registered_route(temp_routes, RouteNames, State) of
     {error, State} ->
       find_registered_route(routes, lists:reverse([make_exchange_key("all", default)|RouteNames]), State);
-    Route ->
-      Route
+    Routes ->
+      Routes
   end.
 
 find_registered_route(temp_routes, [H|T], State) ->
@@ -226,8 +215,8 @@ find_registered_route(routes, [H|T], State) ->
   case dict:find(H, State#state.routes) of
     error ->
       find_registered_route(routes, T, State);
-    Route ->
-      {Route, State}
+    Routes ->
+      {Routes, State}
   end;
 find_registered_route(routes, [], State) ->
   {error, State}.
