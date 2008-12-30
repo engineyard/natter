@@ -44,8 +44,7 @@ registration_test_() ->
      fun() ->
          natter_dispatcher:clear(natterd),
          ?assertMatch(ok, natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())),
-         ?assertMatch({error, already_registered, _To, _CP},
-                      natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())) end]}].
+         ?assertMatch(ok, natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())) end]}].
 
 simple_routing_test_() ->
   [{setup, fun() ->
