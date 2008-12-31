@@ -28,6 +28,16 @@ AC_FUNC_MALLOC
 AC_CHECK_FUNCS([memmove memset])
 
 # Erlang stuff
+
+# There is a bug in the Erlang support in autoconf versions after 2.61. So, in
+# order to provide a consistent experience, this is a workaround. The bug has
+# been fixed, but a new version has not yet been released.
+m4_define([AC_LANG(Erlang)],
+[ac_ext=erl
+ ac_compile='$ERLC $ERLCFLAGS -b beam conftest.$ac_ext >&AS_MESSAGE_LOG_FD'
+ ac_link='$ERLC $ERLCFLAGS -b beam conftest.$ac_ext >&AS_MESSAGE_LOG_FD; echo "#!/bin/sh" > conftest$ac_exeext; echo "\"$ERL\" -s conftest -s init stop -noshell" >> conftest$ac_exeext; chmod +x conftest$ac_exeext'
+])
+
 AC_ERLANG_SUBST_ROOT_DIR
 AC_ERLANG_SUBST_INSTALL_LIB_DIR
 AC_ERLANG_CHECK_LIB(erl_interface,
