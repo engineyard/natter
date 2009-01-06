@@ -24,7 +24,7 @@
 -include("typespecs.hrl").
 
 %% API
--export([start_link/1, close/1, register_default_exchange/2, unregister_default_exchange/1]).
+-export([start_link/1, start_link/2, close/1, register_default_exchange/2, unregister_default_exchange/1]).
 -export([register_exchange/4, unregister_exchange/3, raw_send/2, send_iq/5, send_wait_iq/5]).
 
 %% Supervisor callbacks
@@ -32,7 +32,11 @@
 
 -spec(start_link/1 :: (Config :: config()) -> {ok, pid()} | {exit, string()}).
 start_link(Config) ->
-  {ok, Pid} = supervisor:start_link(?MODULE, [Config]),
+  start_link(Config, undefined).
+
+-spec(start_link/2 :: (Config :: config(), InspectorPid :: pid()) -> {ok, pid()} | {exit, string()}).
+start_link(Config, InspectorPid) ->
+  {ok, Pid} = supervisor:start_link(?MODULE, [Config, InspectorPid]),
   try
     natter_auth:start_link(Pid, self(), Config),
     receive
@@ -106,8 +110,8 @@ send_wait_iq(ConnectionPid, Type, PacketId, To, Packet) when Type =:= "set";
       Err
   end.
 
-init([Config]) ->
-  {ok, {{one_for_all, 5, 60}, build_child_specs(Config)}}.
+init([Config, InspectorPid]) ->
+  {ok, {{one_for_all, 5, 60}, build_child_specs(Config, InspectorPid)}}.
 
 %% Internal functions
 -spec(find_child/2 :: (ConnectionPid :: pid(), 'natter_dispatcher' | 'natter_packetizer') -> pid() | atom()).
@@ -140,9 +144,9 @@ build_iq_packet(Type, PacketId, To, Packet) ->
   {T3, D3} = {T2 ++ ">~s</iq>", [Packet|D2]},
   io_lib:format(T3, lists:reverse(D3)).
 
-build_child_specs(Config) ->
+build_child_specs(Config, InspectorPid) ->
   CS1 = [{natter_dispatcher,
-          {natter_dispatcher, start_link, [Config]},
+          {natter_dispatcher, start_link, [Config, InspectorPid]},
           transient,
           5,
           worker,

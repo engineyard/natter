@@ -29,7 +29,8 @@
         {routes=dict:new(),
          temp_routes=dict:new(),
          config,
-         packetizer}).
+         packetizer,
+         inspector}).
 
 %% API
 -export([start_link/0, start_link/1, register_temporary_exchange/4, register_exchange/4]).
@@ -96,10 +97,10 @@ init([]) ->
   process_flag(trap_exit, true),
   {ok, #state{}};
 
-init([Config]) ->
+init([Config, InspectorPid]) ->
   process_flag(trap_exit, true),
   {ok, P} = natter_packetizer:start_link(Config, self()),
-  {ok, #state{packetizer=P, config=Config}}.
+  {ok, #state{packetizer=P, config=Config, inspector=InspectorPid}}.
 
 handle_call(clear, _From, _State) ->
   {reply, ok, #state{}};
@@ -151,18 +152,20 @@ handle_call({unregister_exchange, PacketType, TargetJid, Consumer}, _From, State
 handle_call(_Request, _From, State) ->
   {reply, ignored, State}.
 
-handle_cast({dispatch, {xmlelement, PacketType, Attrs, _}=Stanza}, State) ->
-  Jid = extract_routable_jid("from", Attrs),
-  NewState = case find_target(PacketType, Jid, State) of
-               {{ok, Routes}, S} ->
-                 lists:foreach(fun(R) -> R ! {packet, Stanza} end, Routes),
-                 S;
-               {error, S} ->
-                 natter_logger:log(?FILE, ?LINE, ["Ignoring unroutable packet: ",
-                                                  natter_parser:element_to_string(Stanza)]),
-                 S
-             end,
-  {noreply, NewState};
+handle_cast({dispatch, Stanza}, State) ->
+  case evaluate_stanza(Stanza, State#state.inspector) of
+    route ->
+      {noreply, route_message(Stanza, State)};
+    drop ->
+      {noreply, State};
+    {Action, DelaySeconds} when Action =:= delay;
+                                Action =:= duplicate ->
+      spawn(fun() -> send_with_delay(self(), Stanza, DelaySeconds) end),
+      {noreply, State}
+  end;
+
+handle_cast({redispatch, Stanza}, State) ->
+  {noreply, route_message(Stanza, State)};
 
 handle_cast(_Msg, State) ->
   {noreply, State}.
@@ -184,6 +187,29 @@ code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
 %% Internal functions
+send_with_delay(DispatcherPid, Stanza, DelaySeconds) ->
+  receive
+    _ ->
+      ok
+  after DelaySeconds ->
+      gen_server:cast(DispatcherPid, {redispatch, Stanza})
+  end.
+
+route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
+  Jid = extract_routable_jid("from", Attrs),
+  case find_target(PacketType, Jid, State) of
+    {{ok, Routes}, S} ->
+      lists:foreach(fun(R) -> R ! {packet, Stanza} end, Routes),
+      S;
+    {error, S} ->
+      natter_logger:log(?FILE, ?LINE, ["Ignoring unroutable packet: ",
+                                       natter_parser:element_to_string(Stanza)]),
+      S
+  end.
+
+
+evaluate_stanza(Stanza, undefined) ->
+  route.
 
 extract_routable_jid(FieldName, Attrs) ->
   case proplists:get_value(FieldName, Attrs) of
