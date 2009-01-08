@@ -33,7 +33,7 @@
          inspector}).
 
 %% API
--export([start_link/0, start_link/1, register_temporary_exchange/4, register_exchange/4]).
+-export([start_link/0, start_link/2, register_temporary_exchange/4, register_exchange/4]).
 -export([unregister_exchange/3, dispatch/2, get_packetizer/1, send_and_wait/2, clear/1]).
 
 %% gen_server callbacks
@@ -44,9 +44,9 @@
 start_link() ->
   gen_server:start_link(?MODULE, [], []).
 
--spec(start_link/1 :: (Config :: config()) -> {'ok', pid()}).
-start_link(Config) ->
-  gen_server:start_link(?MODULE, [Config], []).
+-spec(start_link/2 :: (Config :: config(), InspectorPid :: pid()) -> {'ok', pid()}).
+start_link(Config, InspectorPid) ->
+  gen_server:start_link(?MODULE, [Config, InspectorPid], []).
 
 -spec(clear/1 :: (ServerPid :: pid()) -> 'ok').
 clear(ServerPid) ->
@@ -208,7 +208,7 @@ route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
   end.
 
 
-evaluate_stanza(Stanza, undefined) ->
+evaluate_stanza(_Stanza, undefined) ->
   route.
 
 extract_routable_jid(FieldName, Attrs) ->
