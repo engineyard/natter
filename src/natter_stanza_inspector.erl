@@ -22,4 +22,5 @@
 -export([behaviour_info/1]).
 
 behaviour_info(callbacks) ->
-  [{inspect_stanza, 1}].
+  [{inspect_inbound_stanza, 2},
+   {annotate_outbound_stanza, 2}].

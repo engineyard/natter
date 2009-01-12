@@ -100,6 +100,12 @@ init([]) ->
 init([Config, InspectorPid]) ->
   process_flag(trap_exit, true),
   {ok, P} = natter_packetizer:start_link(Config, self()),
+  if
+    InspectorPid =:= undefined ->
+      ok;
+    true ->
+      link(InspectorPid)
+  end,
   {ok, #state{packetizer=P, config=Config, inspector=InspectorPid}}.
 
 handle_call(clear, _From, _State) ->
