@@ -165,8 +165,7 @@ handle_cast({dispatch, Stanza}, State) ->
       {noreply, route_message(Stanza, State)};
     drop ->
       {noreply, State};
-    {Action, DelaySeconds} when Action =:= delay;
-                                Action =:= duplicate ->
+    {Action, DelaySeconds} when Action =:= delay ->
       spawn(fun() -> send_with_delay(self(), Stanza, DelaySeconds) end),
       {noreply, State}
   end;
