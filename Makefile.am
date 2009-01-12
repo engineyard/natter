@@ -1,5 +1,9 @@
 SUBDIRS = src tests
 
+clean-hook:
+	rm -rf ebin/*
+	rm -rf priv/lib/*
+
 dist-hook:
 	mkdir $(distdir)/ebin
 
