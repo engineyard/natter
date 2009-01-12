@@ -30,10 +30,11 @@
          temp_routes=dict:new(),
          config,
          packetizer,
+         inspector_mod,
          inspector}).
 
 %% API
--export([start_link/0, start_link/2, register_temporary_exchange/4, register_exchange/4]).
+-export([start_link/0, start_link/3, register_temporary_exchange/4, register_exchange/4]).
 -export([unregister_exchange/3, dispatch/2, get_packetizer/1, send_and_wait/2, clear/1]).
 
 %% gen_server callbacks
@@ -44,9 +45,9 @@
 start_link() ->
   gen_server:start_link(?MODULE, [], []).
 
--spec(start_link/2 :: (Config :: config(), InspectorPid :: pid()) -> {'ok', pid()}).
-start_link(Config, InspectorPid) ->
-  gen_server:start_link(?MODULE, [Config, InspectorPid], []).
+-spec(start_link/3 :: (Config :: config(), InspectorMod :: atom(), InspectorPid :: pid()) -> {'ok', pid()}).
+start_link(Config, InspectorMod, InspectorPid) ->
+  gen_server:start_link(?MODULE, [Config, InspectorMod, InspectorPid], []).
 
 -spec(clear/1 :: (ServerPid :: pid()) -> 'ok').
 clear(ServerPid) ->
@@ -97,7 +98,7 @@ init([]) ->
   process_flag(trap_exit, true),
   {ok, #state{}};
 
-init([Config, InspectorPid]) ->
+init([Config, InspectorMod, InspectorPid]) ->
   process_flag(trap_exit, true),
   {ok, P} = natter_packetizer:start_link(Config, self()),
   if
@@ -106,7 +107,7 @@ init([Config, InspectorPid]) ->
     true ->
       link(InspectorPid)
   end,
-  {ok, #state{packetizer=P, config=Config, inspector=InspectorPid}}.
+  {ok, #state{packetizer=P, config=Config, inspector_mod=InspectorMod, inspector=InspectorPid}}.
 
 handle_call(clear, _From, _State) ->
   {reply, ok, #state{}};
@@ -159,7 +160,7 @@ handle_call(_Request, _From, State) ->
   {reply, ignored, State}.
 
 handle_cast({dispatch, Stanza}, State) ->
-  case evaluate_stanza(Stanza, State#state.inspector) of
+  case evaluate_inbound_stanza(Stanza, State#state.inspector_mod, State#state.inspector) of
     route ->
       {noreply, route_message(Stanza, State)};
     drop ->
@@ -214,8 +215,11 @@ route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
   end.
 
 
-evaluate_stanza(_Stanza, undefined) ->
-  route.
+evaluate_inbound_stanza(_Stanza, undefined, undefined) ->
+  route;
+evaluate_inbound_stanza(Stanza, InspectorMod, Inspector) when is_atom(InspectorMod),
+                                                              is_pid(Inspector) ->
+  InspectorMod:inspect_inbound_stanza(Inspector, Stanza).
 
 extract_routable_jid(FieldName, Attrs) ->
   case proplists:get_value(FieldName, Attrs) of
