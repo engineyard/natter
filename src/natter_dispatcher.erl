@@ -160,13 +160,14 @@ handle_call(_Request, _From, State) ->
   {reply, ignored, State}.
 
 handle_cast({dispatch, Stanza}, State) ->
+  ServerPid = self(),
   case evaluate_inbound_stanza(Stanza, State#state.inspector_mod, State#state.inspector) of
     route ->
       {noreply, route_message(Stanza, State)};
     drop ->
       {noreply, State};
     {Action, DelaySeconds} when Action =:= delay ->
-      spawn(fun() -> send_with_delay(self(), Stanza, DelaySeconds) end),
+      spawn(fun() -> send_with_delay(ServerPid, Stanza, DelaySeconds) end),
       {noreply, State}
   end;
 
@@ -194,12 +195,8 @@ code_change(_OldVsn, State, _Extra) ->
 
 %% Internal functions
 send_with_delay(DispatcherPid, Stanza, DelaySeconds) ->
-  receive
-    _ ->
-      ok
-  after DelaySeconds ->
-      gen_server:cast(DispatcherPid, {redispatch, Stanza})
-  end.
+  timer:sleep(DelaySeconds * 1000),
+  gen_server:cast(DispatcherPid, {redispatch, Stanza}).
 
 route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
   Jid = extract_routable_jid("from", Attrs),
