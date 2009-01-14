@@ -163,6 +163,7 @@ handle_cast({dispatch, Stanza}, State) ->
   ServerPid = self(),
   case evaluate_inbound_stanza(Stanza, State#state.inspector_mod, State#state.inspector) of
     {replace, NewStanza} ->
+      io:format("Replacing with: ~p~n", [NewStanza]),
       {noreply, route_message(NewStanza, State)};
     route ->
       {noreply, route_message(Stanza, State)};
