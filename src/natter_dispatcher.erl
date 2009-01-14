@@ -162,6 +162,8 @@ handle_call(_Request, _From, State) ->
 handle_cast({dispatch, Stanza}, State) ->
   ServerPid = self(),
   case evaluate_inbound_stanza(Stanza, State#state.inspector_mod, State#state.inspector) of
+    {replace, NewStanza} ->
+      {noreply, route_message(NewStanza, State)};
     route ->
       {noreply, route_message(Stanza, State)};
     drop ->
