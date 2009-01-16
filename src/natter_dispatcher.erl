@@ -246,7 +246,7 @@ find_target(PacketType, Jid, State) ->
     {error, State} ->
       RouteList = case Jid =:= "error" of
                     true ->
-                      [make_exchange_key("all", "error")|lists:reverse([make_exchange_key("all", default)|RouteNames])];
+                      lists:append([RouteNames, [make_exchange_key("all", "error")], [make_exchange_key("all", default)]]);
                     false ->
                       lists:reverse([make_exchange_key("all", default)|RouteNames])
                   end,
