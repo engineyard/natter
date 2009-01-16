@@ -163,7 +163,6 @@ handle_cast({dispatch, Stanza}, State) ->
   ServerPid = self(),
   case evaluate_inbound_stanza(Stanza, State#state.inspector_mod, State#state.inspector) of
     {replace, NewStanza} ->
-      io:format("Replacing with: ~p~n", [NewStanza]),
       {noreply, route_message(NewStanza, State)};
     route ->
       {noreply, route_message(Stanza, State)};
@@ -202,8 +201,13 @@ send_with_delay(DispatcherPid, Stanza, DelaySeconds) ->
   gen_server:cast(DispatcherPid, {redispatch, Stanza}).
 
 route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
-  Jid = extract_routable_jid("from", Attrs),
-  case find_target(PacketType, Jid, State) of
+  RouteId = case is_error(Attrs) of
+              true ->
+                "error";
+              false ->
+                extract_routable_jid("from", Attrs)
+            end,
+  case find_target(PacketType, RouteId, State) of
     {{ok, Routes}, S} ->
       lists:foreach(fun(R) -> R ! {packet, Stanza} end, Routes),
       S;
@@ -220,6 +224,14 @@ evaluate_inbound_stanza(Stanza, InspectorMod, Inspector) when is_atom(InspectorM
                                                               is_pid(Inspector) ->
   InspectorMod:inspect_inbound_stanza(Inspector, Stanza).
 
+is_error(Attrs) ->
+  case proplists:get_value("type", Attrs) of
+    "error" ->
+      true;
+    _ ->
+      false
+  end.
+
 extract_routable_jid(FieldName, Attrs) ->
   case proplists:get_value(FieldName, Attrs) of
     undefined ->
@@ -232,7 +244,13 @@ find_target(PacketType, Jid, State) ->
   RouteNames = [make_exchange_key(PacketType, Jid)],
   case find_registered_route(temp_routes, RouteNames, State) of
     {error, State} ->
-      find_registered_route(routes, lists:reverse([make_exchange_key("all", default)|RouteNames]), State);
+      RouteList = case Jid =:= "error" of
+                    true ->
+                      [make_exchange_key("all", "error")|lists:reverse([make_exchange_key("all", default)|RouteNames])];
+                    false ->
+                      lists:reverse([make_exchange_key("all", default)|RouteNames])
+                  end,
+      find_registered_route(routes, RouteList, State);
     Routes ->
       Routes
   end.

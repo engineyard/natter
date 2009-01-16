@@ -26,6 +26,7 @@
 %% API
 -export([start_link/1, start_link/3, close/1, register_default_exchange/2, unregister_default_exchange/1]).
 -export([register_exchange/4, unregister_exchange/3, raw_send/2, send_iq/5, send_wait_iq/5]).
+-export([register_error_handler/2, register_error_handler/3, unregister_error_handler/1, unregister_error_handler/2]).
 
 %% Supervisor callbacks
 -export([init/1]).
@@ -68,6 +69,24 @@ register_default_exchange(ConnectionPid, SinkPid) ->
 unregister_default_exchange(ConnectionPid) ->
   DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
   natter_dispatcher:unregister_exchange(DispatcherPid, "all", default).
+
+-spec(register_error_handler/2 :: (ConnectionPid :: pid(), ErrorHandlerPid :: pid()) -> ok | natter_error()).
+register_error_handler(ConnectionPid, ErrorHandlerPid) ->
+  register_error_handler(ConnectionPid, "all", ErrorHandlerPid).
+
+-spec(register_error_handler/3 :: (ConnectionPid :: pid(), PacketType :: string(), ErrorHandlerPid :: pid()) -> ok | natter_error()).
+register_error_handler(ConnectionPid, PacketType, ErrorHandlerPid) ->
+  DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
+  natter_dispatcher:register_exchange(DispatcherPid, PacketType, "error", ErrorHandlerPid).
+
+-spec(unregister_error_handler/1 :: (ConnectionPid :: pid()) -> ok).
+unregister_error_handler(ConnectionPid) ->
+  unregister_error_handler(ConnectionPid, "all").
+
+-spec(unregister_error_handler/2 :: (ConnectionPid :: pid(), PacketType :: string()) -> ok).
+unregister_error_handler(ConnectionPid, PacketType) ->
+  DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
+  natter_dispatcher:unregister_exchange(DispatcherPid, PacketType, "error").
 
 -spec(register_exchange/4 :: (ConnectionPid :: pid(), PacketType :: string(), TargetJid :: string(), SinkPid :: pid()) -> ok | natter_error()).
 register_exchange(ConnectionPid, PacketType, TargetJid, SinkPid) when is_list(TargetJid) ->

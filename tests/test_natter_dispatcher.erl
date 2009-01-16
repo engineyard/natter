@@ -32,13 +32,13 @@
                                           {"id", "100"},
                                           {"type", "result"}], [{xmlelement, "ack", [{"token", "def:ghi"}], []}]}).
 
+-define(ERROR_STANZA, {xmlelement, "iq", [{"type", "error"},
+                                          {"to", "wtf@locahost"}], [{xmlelement, "error", [{"type", "cancel"},
+                                                                                           {"code", "500"}], []}]}).
+
 registration_test_() ->
-  [{setup, fun() ->
-               {ok, Pid} = natter_dispatcher:start_link(),
-               register(natterd, Pid),
-               Pid end,
-    fun(P) ->
-        exit(P, shutdown) end,
+  [{setup, fun start_dispatcher/0,
+    fun stop_dispatcher/1,
     [?_assertMatch(ok, natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())),
      ?_assertMatch(ok, natter_dispatcher:unregister_exchange(natterd, "iq", "foo@localhost")),
      fun() ->
@@ -47,12 +47,8 @@ registration_test_() ->
          ?assertMatch(ok, natter_dispatcher:register_exchange(natterd, "iq", "foo@localhost", self())) end]}].
 
 simple_routing_test_() ->
-  [{setup, fun() ->
-               {ok, Pid} = natter_dispatcher:start_link(),
-               register(natterd, Pid),
-               Pid end,
-    fun(P) ->
-        exit(P, shutdown) end,
+  [{setup, fun start_dispatcher/0,
+    fun stop_dispatcher/1,
     [fun() ->
         natter_dispatcher:clear(natterd),
         setup_receiving_worker(self(), ?TEST_STANZA1),
@@ -68,12 +64,8 @@ simple_routing_test_() ->
         natter_dispatcher:unregister_exchange(natterd, "iq", "bar@localhost") end]}].
 
 async_routing_test_() ->
-  [{setup, fun() ->
-               {ok, Pid} = natter_dispatcher:start_link(),
-               register(natterd, Pid),
-               Pid end,
-    fun(P) ->
-        exit(P, shutdown) end,
+  [{setup, fun start_dispatcher/0,
+    fun stop_dispatcher/1,
     [fun() ->
         natter_dispatcher:clear(natterd),
         setup_async_pair(self(), ?TEST_STANZA1, ?TEST_STANZA2),
@@ -86,13 +78,23 @@ async_routing_test_() ->
         natter_dispatcher:unregister_exchange(natterd, "iq", "foo@localhost"),
         natter_dispatcher:unregister_exchange(natterd, "iq", "bar@localhost") end]}].
 
+error_routing_test_() ->
+  [{setup, fun start_dispatcher/0,
+    fun stop_dispatcher/1,
+    [fun() ->
+         natter_dispatcher:clear(natterd),
+         send_and_verify(fun() -> setup_error_handler(self(), "iq", ?ERROR_STANZA) end,
+                         ?ERROR_STANZA),
+         natter_dispatcher:unregister_exchange(natterd, default, "error") end,
+    fun() ->
+         natter_dispatcher:clear(natterd),
+         send_and_verify(fun() -> setup_error_handler(self(), "all", ?ERROR_STANZA) end,
+                         ?ERROR_STANZA),
+         natter_dispatcher:unregister_exchange(natterd, default, "error") end]}].
+
 blocking_routing_test_() ->
-  [{setup, fun() ->
-               {ok, Pid} = natter_dispatcher:start_link(),
-               register(natterd, Pid),
-               Pid end,
-    fun(P) ->
-        exit(P, shutdown) end,
+  [{setup, fun start_dispatcher/0,
+    fun stop_dispatcher/1,
     [fun() ->
          natter_dispatcher:clear(natterd),
          setup_blocking_pair(self(), ?TEST_STANZA1, ?TEST_STANZA2),
@@ -104,6 +106,46 @@ blocking_routing_test_() ->
          after 2000 ->
              throw({error, timeout})
          end end]}].
+
+start_dispatcher() ->
+  {ok, Pid} = natter_dispatcher:start_link(),
+  register(natterd, Pid),
+  Pid.
+
+stop_dispatcher(Pid) ->
+  exit(Pid, shutdown).
+
+send_and_verify(SetupFun, Stanza) ->
+  natter_dispatcher:clear(natterd),
+  SetupFun(),
+  receive
+    handler_ready ->
+      natter_dispatcher:dispatch(natterd, natter_parser:element_to_string(Stanza))
+  after 2000 ->
+      throw({error, setup_timeout})
+  end,
+  receive
+    {result, DoesMatch} ->
+      ?assertMatch(true, DoesMatch);
+    {worker_error, Error} ->
+      throw({error, Error})
+  after 2000 ->
+      throw({error, timeout})
+  end.
+
+
+setup_error_handler(Owner, PacketType, ErrorStanza) ->
+  spawn(fun() ->
+            natter_dispatcher:register_exchange(natterd, PacketType, "error", self()),
+            Owner ! handler_ready,
+            receive
+              {packet, Stanza} ->
+                Owner ! {result, Stanza =:= ErrorStanza}
+            after 500 ->
+                Owner ! {worker_error, no_packet_routed}
+            end,
+            natter_dispatcher:unregister_exchange(natterd, default, "error") end).
+
 
 setup_blocking_pair(Owner, ReqStanza, ReplyStanza) ->
   spawn(fun() ->

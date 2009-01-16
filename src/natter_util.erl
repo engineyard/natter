@@ -19,7 +19,7 @@
 
 -author("ksmith@engineyard.com").
 
--export([load_xml_driver/0]).
+-export([load_xml_driver/0, test_out/1, test_out/2]).
 
 load_xml_driver() ->
   try
@@ -29,6 +29,11 @@ load_xml_driver() ->
       load_xml_driver(natter_expat)
   end,
   ok.
+
+test_out(Format, Data) ->
+  test_out(io_lib:format(Format, Data)).
+test_out(Message) ->
+  file:write_file("/tmp/test_out.txt", io_lib:format("~s~n", [Message]), [append]).
 
 %% Private functions
 load_xml_driver(Name) ->
