@@ -120,10 +120,11 @@ send_wait_iq(ConnectionPid, Type, PacketId, To, Packet) when Type =:= "set";
   case Result of
     {ok, {xmlelement, _, Attrs, _}} ->
       case proplists:get_value("type", Attrs) of
-        "result" ->
+        ResultType when ResultType =:= "error" orelse ResultType =:= "result" ->
           Result;
         _ ->
-          {error, {illegal_xmpp_reply, Result}}
+          {ok, R} = Result,
+          {error, {illegal_xmpp_reply, R}}
       end;
     Err ->
       Err
