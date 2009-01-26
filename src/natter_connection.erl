@@ -25,7 +25,7 @@
 
 %% API
 -export([start_link/1, start_link/3, close/1, register_default_exchange/2, unregister_default_exchange/1]).
--export([register_exchange/4, unregister_exchange/3, raw_send/2, send_iq/5, send_wait_iq/5]).
+-export([register_exchange/4, unregister_exchange/3, raw_send/2, send_iq/5, send_wait_iq/5, send_wait_iq/6]).
 -export([register_error_handler/2, register_error_handler/3, unregister_error_handler/1, unregister_error_handler/2]).
 
 %% Supervisor callbacks
@@ -114,9 +114,16 @@ send_iq(ConnectionPid, Type, PacketId, To, Packet) ->
 
 send_wait_iq(ConnectionPid, Type, PacketId, To, Packet) when Type =:= "set";
                                                              Type =:= "get" ->
+  send_wait_iq(ConnectionPid, Type, PacketId, To, Packet, 0).
+
+-spec(send_wait_iq/6 :: (ConnectionPid :: pid(), Type :: string(), PacketId :: string(),
+                         To :: string(), Packet :: string(), Timeout :: integer()) -> {'ok', parsed_xml()} | natter_error()).
+
+send_wait_iq(ConnectionPid, Type, PacketId, To, Packet, Timeout) when Type =:= "set";
+                                                                      Type =:= "get" ->
   Dispatcher = find_child(ConnectionPid, natter_dispatcher),
   Iq = build_iq_packet(Type, PacketId, To, Packet),
-  Result = natter_dispatcher:send_and_wait(Dispatcher, Iq),
+  Result = natter_dispatcher:send_and_wait(Dispatcher, Iq, Timeout),
   case Result of
     {ok, {xmlelement, _, Attrs, _}} ->
       case proplists:get_value("type", Attrs) of
