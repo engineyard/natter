@@ -107,6 +107,21 @@ blocking_routing_test_() ->
              throw({error, timeout})
          end end]}].
 
+timeout_routing_test_() ->
+  [{setup, fun start_dispatcher/0,
+    fun stop_dispatcher/1,
+    [fun() ->
+         natter_dispatcher:clear(natterd),
+         setup_timeout_pair(self(), 1000, ?TEST_STANZA1, ?TEST_STANZA2),
+         receive
+           {error, timeout} ->
+             ok;
+           Result ->
+             throw({error, unexpected_result, Result})
+         after 10000 ->
+             throw({error, timeout})
+         end end]}].
+
 start_dispatcher() ->
   {ok, Pid} = natter_dispatcher:start_link(),
   register(natterd, Pid),
@@ -154,7 +169,7 @@ setup_blocking_pair(Owner, ReqStanza, ReplyStanza) ->
               {ok, Result} ->
                 Owner ! {result, Result =:= ReplyStanza};
               Error ->
-                Owner ! {worker_error, Error}
+                Owner ! Error
             end end),
   RecvWorker = spawn(fun() ->
                          receive
@@ -162,6 +177,23 @@ setup_blocking_pair(Owner, ReqStanza, ReplyStanza) ->
                              natter_dispatcher:dispatch(natterd, natter_parser:element_to_string(ReplyStanza))
                          after 2000 ->
                              Owner ! {error, timeout}
+                         end end),
+  natter_dispatcher:register_exchange(natterd, "iq", "bar@localhost", RecvWorker).
+
+setup_timeout_pair(Owner, Timeout, ReqStanza, ReplyStanza) when Timeout > 0 ->
+  spawn(fun() ->
+            timer:sleep(1000),
+            case natter_dispatcher:send_and_wait(natterd, ReqStanza, Timeout) of
+              {ok, Result} ->
+                Owner ! {result, Result =:= ReplyStanza};
+              Error ->
+                Owner ! Error
+            end end),
+  RecvWorker = spawn(fun() ->
+                         receive
+                           {packet, _Stanza} ->
+                             timer:sleep(Timeout + 500),
+                             natter_dispatcher:dispatch(natterd, natter_parser:element_to_string(ReplyStanza))
                          end end),
   natter_dispatcher:register_exchange(natterd, "iq", "bar@localhost", RecvWorker).
 
