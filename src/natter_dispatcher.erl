@@ -25,6 +25,8 @@
 
 -define(SERVER, ?MODULE).
 
+-define(DEFAULT_TIMEOUT, 0).
+
 -record(state,
         {routes=dict:new(),
          temp_routes=dict:new(),
@@ -34,8 +36,8 @@
          inspector}).
 
 %% API
--export([start_link/0, start_link/3, register_temporary_exchange/4, register_exchange/4]).
--export([unregister_exchange/3, dispatch/2, get_packetizer/1, send_and_wait/2, clear/1]).
+-export([start_link/0, start_link/3, register_temporary_exchange/4, register_temporary_exchange/5, register_exchange/4]).
+-export([unregister_exchange/3, dispatch/2, get_packetizer/1, send_and_wait/2, send_and_wait/3, clear/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -57,9 +59,15 @@ clear(ServerPid) ->
 register_exchange(ServerPid, PacketType, TargetJid, ConsumerPid) ->
   gen_server:call(ServerPid, {register_exchange, PacketType, TargetJid, ConsumerPid}).
 
--spec(register_temporary_exchange/4 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
+-spec(register_temporary_exchange/4 :: (ServerPid :: pid(), PacketType :: string(),
+                                        TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
 register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid) ->
-  gen_server:call(ServerPid, {register_temp_exchange, PacketType, TargetJid, ConsumerPid}).
+  register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid, ?DEFAULT_TIMEOUT).
+
+-spec(register_temporary_exchange/5 :: (ServerPid :: pid(), PacketType :: string(),
+                                        TargetJid :: string() | 'default', ConsumerPid :: pid(), ExchangeTimeout :: integer()) -> 'ok' | {'error', string()}).
+register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid, ExchangeTimeout) ->
+  gen_server:call(ServerPid, {register_temp_exchange, PacketType, TargetJid, ConsumerPid, ExchangeTimeout}).
 
 -spec(unregister_exchange/3 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default') -> 'ok').
 unregister_exchange(ServerPid, PacketType, TargetJid) ->
@@ -74,21 +82,33 @@ dispatch(ServerPid, Stanza) ->
   gen_server:cast(ServerPid, {dispatch, natter_parser:parse(Stanza)}).
 
 -spec(send_and_wait/2 :: (ServerPid :: pid(), Stanza :: tuple() | string() ) -> {'ok', parsed_xml()} | {'error', 'timeout'}).
-send_and_wait(ServerPid, Stanza) when is_list(Stanza) ->
-  send_and_wait(ServerPid, natter_parser:parse(Stanza));
-send_and_wait(ServerPid, {xmlelement, PacketType, Attrs, _} = Stanza) ->
+send_and_wait(ServerPid, Stanza) ->
+  send_and_wait(ServerPid, Stanza, ?DEFAULT_TIMEOUT).
+
+-spec(send_and_wait/3 :: (ServerPid :: pid(), Stanza :: tuple() | string(), Timeout :: integer() ) -> {'ok', parsed_xml()} | {'error', 'timeout'}).
+send_and_wait(ServerPid, Stanza, Timeout) when is_list(Stanza) ->
+  send_and_wait(ServerPid, natter_parser:parse(Stanza), Timeout);
+send_and_wait(ServerPid, {xmlelement, PacketType, Attrs, _} = Stanza, Timeout) ->
   To = extract_routable_jid("to", Attrs),
-  case register_temporary_exchange(ServerPid, PacketType, To, self()) of
+  case register_temporary_exchange(ServerPid, PacketType, To, self(), Timeout) of
     {error, already_registered} ->
       timer:sleep(100),
-      send_and_wait(ServerPid, Stanza);
+      send_and_wait(ServerPid, Stanza, Timeout);
     ok ->
       gen_server:call(ServerPid, {send, Stanza}),
-      receive
-        {packet, Reply} ->
-          {ok, Reply}
-      after 60000 ->
-          {error, timeout}
+      if
+        Timeout > 0 ->
+          receive
+            {packet, Reply} ->
+              {ok, Reply}
+          after Timeout ->
+              {error, timeout}
+          end;
+        true ->
+          receive
+            {packet, Reply} ->
+              {ok, Reply}
+          end
       end
   end.
 %%====================================================================
@@ -126,7 +146,7 @@ handle_call({send, Stanza}, _From, State) ->
 handle_call(get_packetizer, _From, State) ->
   {reply, State#state.packetizer, State};
 
-handle_call({register_temp_exchange, PacketType, TargetJid, ConsumerPid}, _From, State) ->
+handle_call({register_temp_exchange, PacketType, TargetJid, ConsumerPid, Timeout}, _From, State) ->
   Key = make_exchange_key(PacketType, TargetJid),
   [Reply, NewState] = case dict:find(Key, State#state.temp_routes) of
                         {ok, Pids} ->
@@ -134,6 +154,12 @@ handle_call({register_temp_exchange, PacketType, TargetJid, ConsumerPid}, _From,
                         error ->
                           [ok, State#state{temp_routes=dict:store(Key, [ConsumerPid], State#state.temp_routes)}]
                       end,
+  if
+    Timeout > 0 ->
+      timer:send_after(Timeout, {temp_exchange_timeout, Key, ConsumerPid});
+    true ->
+      ok
+  end,
   {reply, Reply, NewState};
 
 handle_call({register_exchange, PacketType, TargetJid, ConsumerPid}, _From, State) ->
@@ -179,6 +205,15 @@ handle_cast({redispatch, Stanza}, State) ->
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
+handle_info({temp_exchange_timeout, Key, ConsumerPid}, State) ->
+  NewState = case dict:find(Key, State#state.temp_routes) of
+               error ->
+                 State;
+               {ok, ConsumerPids} ->
+                 FilteredPids = [P || P <- ConsumerPids, (P =:= ConsumerPid) =:= false],
+                 State#state{temp_routes=dict:store(Key, FilteredPids, State#state.temp_routes)}
+             end,
+  {noreply, NewState};
 
 handle_info(_Info, State) ->
   {noreply, State}.
