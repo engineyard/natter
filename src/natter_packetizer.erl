@@ -94,7 +94,7 @@ handle_cast({send_packet, Packet}, State) ->
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
-handle_info({tcp, Socket, Data}, State) ->
+handle_info({_SockType, Socket, Data}, State) ->
   natter_logger:log(?FILE, ?LINE, ["Received: ", Data]),
   reset_socket(State#state.socket_type, Socket),
   S1 = buffer_data(Data, State),
