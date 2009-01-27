@@ -34,7 +34,8 @@
         {buffer=[],
          config,
          socket,
-         dispatcher}).
+         dispatcher,
+         socket_type=tcp}).
 
 send(ServerPid, Packet) ->
   gen_server:cast(ServerPid, {send_packet, Packet}).
@@ -58,8 +59,12 @@ init([]) ->
 
 init([{Config, Dispatcher}]) ->
   process_flag(trap_exit, true),
-  {ok, Socket} = open_connection(Config),
-  {ok, #state{socket=Socket, dispatcher=Dispatcher, config=Config}}.
+  case open_connection(Config) of
+    {ok, SocketType, Socket} ->
+      {ok, #state{socket_type=SocketType, socket=Socket, dispatcher=Dispatcher, config=Config}};
+    Error ->
+      {stop, Error}
+  end.
 
 handle_call(current_buffer, _From, State) ->
   {reply, State#state.buffer, State};
@@ -71,10 +76,16 @@ handle_cast(reset, State) ->
   {noreply, State#state{buffer=[]}};
 
 handle_cast({send_packet, Packet}, State) ->
-  case gen_tcp:send(State#state.socket, Packet) of
+  Result = case State#state.socket_type of
+             tcp ->
+               gen_tcp:send(State#state.socket, Packet);
+             ssl ->
+               ssl:send(State#state.socket, Packet)
+           end,
+  case Result of
     ok ->
       natter_logger:log(?FILE, ?LINE, ["Sent: ", Packet]),
-      {noreply, State};
+      {noreply, State, 15000};
     {error, Reason} ->
       natter_logger:log(?FILE, ?LINE, ["Fatal Error", Reason]),
       {stop, Reason, State}
@@ -85,7 +96,7 @@ handle_cast(_Msg, State) ->
 
 handle_info({tcp, Socket, Data}, State) ->
   natter_logger:log(?FILE, ?LINE, ["Received: ", Data]),
-  reset_socket(Socket),
+  reset_socket(State#state.socket_type, Socket),
   S1 = buffer_data(Data, State),
   case classify(S1#state.buffer) of
     start_stream ->
@@ -114,7 +125,12 @@ terminate(_Reason, State) ->
     [] ->
       ok;
     Socket ->
-      gen_tcp:close(Socket)
+      case State#state.socket_type of
+        tcp ->
+          gen_tcp:close(Socket);
+        ssl ->
+          ssl:close(Socket)
+      end
   end.
 
 code_change(_OldVsn, State, _Extra) ->
@@ -151,13 +167,39 @@ dispatch(Stanza, State) ->
 buffer_data(Data, State) ->
   State#state{buffer=lists:append(State#state.buffer, Data)}.
 
-reset_socket([]) ->
+reset_socket(_, []) ->
   ok;
-reset_socket(Socket) ->
-  inet:setopts(Socket, [{active, once}]).
+reset_socket(tcp, Socket) ->
+  inet:setopts(Socket, [{active, once}]);
+reset_socket(ssl, Socket) ->
+  ssl:setopts(Socket, [{active, once}]).
 
 
 open_connection(Config) ->
+  Hosts = prepare_connect_values(Config),
+  open_socket(Hosts).
+
+%% TODO: Remove this function when SSL socket upgrades
+%% work. Hopefully in R12B-6.
+open_socket(Hosts) ->
+  tcp_connect(Hosts).
+
+
+%% FIXME: Test this code again when R12B-6 has been released
+%% See if the socket upgrade code in ssl_new is fixed
+%% http://www.nabble.com/Upgrading-gen_tcp-socket-to-ssl-td20322574.html
+%% open_socket(Hosts) ->
+%%   ssl:start(),
+%%   case ssl_connect(Hosts) of
+%%     {ok, ssl, Socket} ->
+%%       natter_logger:log(?FILE, ?LINE, "Connected via SSL"),
+%%       {ok, ssl, Socket};
+%%     _Error ->
+%%       natter_logger:log(?FILE, ?LINE, "Connected via plain TCP"),
+%%       tcp_connect(Hosts)
+%%   end.
+
+prepare_connect_values(Config) ->
   Hosts = case proplists:get_value(service, Config) of
             undefined ->
               H = proplists:get_value(host, Config, "localhost"),
@@ -166,7 +208,6 @@ open_connection(Config) ->
             {Service, Domain} ->
               case natter_srv:resolve_service(Service, Domain) of
                 {ok, Entries} ->
-                  io:format("Entries: ~p~n", [Entries]),
                   Entries;
                 Error ->
                   throw({config_error, Error})
@@ -180,33 +221,34 @@ open_connection(Config) ->
     false ->
       ok
   end,
-  case proplists:get_value(ssl, Config) of
-    undefined ->
-      tcp_connect(Hosts);
-    false ->
-      tcp_connect(Hosts);
-    true ->
-      ssl_connect(Hosts);
-    Oops ->
-      throw({badarg, Oops})
-  end.
-
-ssl_connect(_) ->
-  exit(self(), unsupported_connect_type).
+  Hosts.
 
 tcp_connect([{Host, Port}|T]) ->
   case gen_tcp:connect(Host, Port, [list, {keepalive, true},
-                                            {nodelay, true},
-                                            {active, once},
-                                            {packet, 0},
-                                            {reuseaddr, true}]) of
+                                    {nodelay, true},
+                                    {packet, 0},
+                                    {reuseaddr, true}]) of
     {ok, Sock} ->
-      gen_tcp:controlling_process(Sock, self()),
-      {ok, Sock};
+      {ok, tcp, Sock};
     _ ->
       tcp_connect(T)
   end;
 tcp_connect([]) ->
+  {error, no_hosts_available}.
+
+ssl_connect([{Host, Port}|T]) ->
+  case ssl:connect(Host, Port, [list, {keepalive, true},
+                                {nodelay, true},
+                                {packet, 0},
+                                {reuseaddr, true},
+                                {verify, 0},
+                                {depth, 0}]) of
+    {ok, Socket} ->
+      {ok, ssl, Socket};
+    _Error ->
+      ssl_connect(T)
+  end;
+ssl_connect([]) ->
   {error, no_hosts_available}.
 
 strip_xml_decl(Buffer) ->
