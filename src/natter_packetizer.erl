@@ -94,7 +94,8 @@ handle_cast({send_packet, Packet}, State) ->
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
-handle_info({_SockType, Socket, Data}, State) ->
+handle_info({SockType, Socket, Data}, State) when SockType =:= tcp;
+                                                  SockType =:= ssl ->
   natter_logger:log(?FILE, ?LINE, ["Received: ", Data]),
   reset_socket(State#state.socket_type, Socket),
   S1 = buffer_data(Data, State),
@@ -229,6 +230,7 @@ tcp_connect([{Host, Port}|T]) ->
                                     {packet, 0},
                                     {reuseaddr, true}]) of
     {ok, Sock} ->
+      gen_tcp:controlling_process(Sock, self()),
       {ok, tcp, Sock};
     _ ->
       tcp_connect(T)
