@@ -236,11 +236,16 @@ send_with_delay(DispatcherPid, Stanza, DelaySeconds) ->
   gen_server:cast(DispatcherPid, {redispatch, Stanza}).
 
 route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
-  RouteId = case is_error(Attrs) of
-              true ->
-                "error";
-              false ->
-                extract_routable_jid("from", Attrs)
+  RouteId = case extract_routable_jid("from", Attrs) of
+              default ->
+                case is_error(Attrs) of
+                  true ->
+                    "error";
+                  false ->
+                    default
+                end;
+              Value ->
+                Value
             end,
   case find_target(PacketType, RouteId, State) of
     {{ok, Routes}, S} ->
@@ -251,6 +256,23 @@ route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
                                        natter_parser:element_to_string(Stanza)]),
       S
   end.
+
+%% route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
+%%   RouteId = case is_error(Attrs) of
+%%               true ->
+%%                 "error";
+%%               false ->
+%%                 extract_routable_jid("from", Attrs)
+%%             end,
+%%   case find_target(PacketType, RouteId, State) of
+%%     {{ok, Routes}, S} ->
+%%       lists:foreach(fun(R) -> R ! {packet, Stanza} end, Routes),
+%%       S;
+%%     {error, S} ->
+%%       natter_logger:log(?FILE, ?LINE, ["Ignoring unroutable packet: ",
+%%                                        natter_parser:element_to_string(Stanza)]),
+%%       S
+%%   end.
 
 
 evaluate_inbound_stanza(_Stanza, undefined, undefined) ->
