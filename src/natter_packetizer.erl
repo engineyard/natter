@@ -23,7 +23,7 @@
 
 
 %% API
--export([start_link/0, start_link/2, current_buffer/1, reset/1, send/2]).
+-export([start_link/0, start_link/2, current_buffer/1, reset/1, send/2, set_connection/2]).
 
 
 %% gen_server callbacks
@@ -34,6 +34,7 @@
         {buffer=[],
          config,
          socket,
+         connection,
          dispatcher,
          socket_type=tcp}).
 
@@ -47,6 +48,9 @@ current_buffer(ServerPid) ->
 reset(ServerPid) ->
   gen_server:cast(ServerPid, reset).
 
+set_connection(ServerPid, ConnectionPid) ->
+  gen_server:cast(ServerPid, {connection, ConnectionPid}).
+
 start_link() ->
   gen_server:start_link(?MODULE, [], []).
 
@@ -54,12 +58,11 @@ start_link(Config, Dispatcher) ->
   gen_server:start_link(?MODULE, [{Config, Dispatcher}], []).
 
 init([]) ->
-  process_flag(trap_exit, true),
   {ok, #state{}};
 
 init([{Config, Dispatcher}]) ->
   process_flag(trap_exit, true),
-  case open_connection(Config) of
+  case open_socket(Config) of
     {ok, SocketType, Socket} ->
       {ok, #state{socket_type=SocketType, socket=Socket, dispatcher=Dispatcher, config=Config}};
     Error ->
@@ -71,6 +74,10 @@ handle_call(current_buffer, _From, State) ->
 
 handle_call(_Request, _From, State) ->
   {reply, ignored, State}.
+
+handle_cast({connection, ConnectionPid}, State) ->
+  io:format("My connection is ~p~n", [ConnectionPid]),
+  {noreply, State#state{connection=ConnectionPid}};
 
 handle_cast(reset, State) ->
   {noreply, State#state{buffer=[]}};
@@ -93,6 +100,9 @@ handle_cast({send_packet, Packet}, State) ->
 
 handle_cast(_Msg, State) ->
   {noreply, State}.
+
+handle_info({tcp_closed, _Socket}, State) ->
+  {noreply, reconnect(State)};
 
 handle_info({SockType, Socket, Data}, State) when SockType =:= tcp;
                                                   SockType =:= ssl ->
@@ -138,6 +148,15 @@ code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
 %% Internal functions
+reconnect(State) ->
+  case open_socket(State#state.config) of
+    {ok, SockType, Sock} ->
+      State#state{socket_type=SockType, socket=Sock};
+    _ ->
+      timer:sleep(1000),
+      reconnect(State)
+  end.
+
 classify(Buffer) ->
   case string:str(Buffer, "<stream:stream") of
     0 ->
@@ -176,13 +195,13 @@ reset_socket(ssl, Socket) ->
   ssl:setopts(Socket, [{active, once}]).
 
 
-open_connection(Config) ->
+open_socket(Config) ->
   Hosts = prepare_connect_values(Config),
-  open_socket(Hosts).
+  connect_socket(Hosts).
 
 %% TODO: Remove this function when SSL socket upgrades
 %% work. Hopefully in R12B-6.
-open_socket(Hosts) ->
+connect_socket(Hosts) ->
   tcp_connect(Hosts).
 
 
