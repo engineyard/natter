@@ -22,10 +22,6 @@ EXTRA_DIST = $(erl_files) $(hrl_files)
 ERLCFLAGS = @ERLCFLAGS@ +warn_obsolete_guard +warn_unused_import \
 	+warn_shadow_vars +warn_export_vars +debug_info
 
-../ebin:
-	mkdir ../ebin
-
-../ebin/%.beam: ../ebin
 ../ebin/%.beam: %.erl
 	$(ERLC) $(ERLCFLAGS) -b beam -o ../ebin $<
 
