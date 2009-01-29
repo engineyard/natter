@@ -151,6 +151,7 @@ code_change(_OldVsn, State, _Extra) ->
 reconnect(State) ->
   case open_socket(State#state.config) of
     {ok, SockType, Sock} ->
+      timer:send_after(100, State#state.dispatcher, reconnected),
       State#state{socket_type=SockType, socket=Sock};
     _ ->
       timer:sleep(1000),

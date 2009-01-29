@@ -19,7 +19,7 @@
 
 -author("ksmith@engineyard.com").
 
--export([load_xml_driver/0, test_out/1, test_out/2]).
+-export([load_xml_driver/0, build_iq_stanza/4, test_out/1, test_out/2]).
 
 load_xml_driver() ->
   try
@@ -29,6 +29,23 @@ load_xml_driver() ->
       load_xml_driver(natter_expat)
   end,
   ok.
+
+build_iq_stanza(Type, PacketId, To, Packet) ->
+  T = "<iq xml:lang='en' type='~s'",
+  {T1, D1} = case PacketId of
+                 "" ->
+                   {T, [Type]};
+                 _ ->
+                   {T ++ " id='~s'", [PacketId, Type]}
+               end,
+  {T2, D2} = case To of
+               "" ->
+                 {T1, D1};
+               _ ->
+                 {T1 ++ " to='~s'", [To|D1]}
+             end,
+  {T3, D3} = {T2 ++ ">~s</iq>", [Packet|D2]},
+  io_lib:format(T3, lists:reverse(D3)).
 
 test_out(Format, Data) ->
   test_out(io_lib:format(Format, Data)).

@@ -35,21 +35,22 @@
          password,
          resource,
          owner,
-         connection}).
+         dispatcher}).
 
--spec(start_link/3 :: (Connection :: pid(), Owner :: pid(), Config :: config()) -> {'ok', pid()} | {'error', string() | atom()}).
-start_link(Connection, Owner, Config) ->
-  gen_server:start_link(?MODULE, [Connection, Owner, Config], []).
+-spec(start_link/3 :: (Dispatcher :: pid(), Owner :: pid(), Config :: config()) -> {'ok', pid()} | {'error', string() | atom()}).
+start_link(Dispatcher, Owner, Config) ->
+  gen_server:start_link(?MODULE, [Dispatcher, Owner, Config], []).
 
-init([Connection, Owner, Config]) ->
-  natter_connection:register_default_exchange(Connection, self()),
+init([Dispatcher, Owner, Config]) ->
+  Owner ! {auth_pid, self()},
+  ok = natter_dispatcher:register_exchange(Dispatcher, "all", default, self()),
   Host = proplists:get_value(host, Config, "localhost"),
   User = proplists:get_value(user, Config),
   Password = proplists:get_value(password, Config),
   Resource = proplists:get_value(resource, Config, User),
-  natter_connection:raw_send(Connection, build_streams_header(Host)),
+  ok = natter_dispatcher:raw_send(Dispatcher, build_streams_header(Host)),
   {ok, #state{user=User, password=Password, resource=Resource,
-              owner=Owner, connection=Connection}}.
+              owner=Owner, dispatcher=Dispatcher}}.
 
 handle_call(_Request, _From, State) ->
   Reply = ok,
@@ -59,9 +60,10 @@ handle_cast(_Msg, State) ->
   {noreply, State}.
 
 handle_info({packet, {xmlelement, "stream:stream", _, _}}, State) ->
-  case natter_connection:send_wait_iq(State#state.connection, "set", "1", "", build_auth_packet(State#state.user,
-                                                                                                State#state.password,
-                                                                                                State#state.resource)) of
+  AuthStanza = natter_util:build_iq_stanza("set", "1", "", build_auth_packet(State#state.user,
+                                                                             State#state.password,
+                                                                             State#state.resource)),
+  case natter_dispatcher:send_and_wait(State#state.dispatcher, AuthStanza) of
     {ok, {xmlelement, "iq", Attrs, _}} ->
       case proplists:get_value("type", Attrs) of
         "result" ->
@@ -70,7 +72,8 @@ handle_info({packet, {xmlelement, "stream:stream", _, _}}, State) ->
           State#state.owner ! {auth, err}
       end;
     Error ->
-      State#state.owner ! Error
+      io:foramt("Send and wait returned: ~p~n", [Error]),
+      State#state.owner ! {auth, fatal, {Error}}
   end,
   {stop, normal, State};
 
@@ -78,7 +81,7 @@ handle_info(_Info, State) ->
   {noreply, State}.
 
 terminate(_Reason, State) ->
-  natter_connection:unregister_default_exchange(State#state.connection),
+  natter_dispatcher:unregister_exchange(State#state.dispatcher, "all", default),
   ok.
 
 code_change(_OldVsn, State, _Extra) ->

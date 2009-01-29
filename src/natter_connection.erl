@@ -37,23 +37,7 @@ start_link(Config) ->
 
 -spec(start_link/3 :: (Config :: config(), InspectorMod :: atom(), InspectorPid :: pid()) -> {ok, pid()} | {exit, string()}).
 start_link(Config, InspectorMod, InspectorPid) ->
-  {ok, Pid} = supervisor:start_link(?MODULE, [Config, InspectorMod, InspectorPid]),
-  try
-    natter_auth:start_link(Pid, self(), Config),
-    receive
-      {auth, ok} ->
-        {ok, Pid};
-      {auth, err} ->
-        close(Pid),
-        {error, auth_error}
-    after 60000 ->
-        close(Pid),
-        {error, auth_error}
-    end
-  catch
-    Error ->
-      {error, Error}
-  end.
+  supervisor:start_link(?MODULE, [Config, InspectorMod, InspectorPid]).
 
 -spec(close/1 :: (ConnectionPid :: pid()) -> ok).
 close(ConnectionPid) ->
@@ -106,7 +90,7 @@ raw_send(ConnectionPid, Packet) ->
 -spec(send_iq/5 :: (ConnectionPid :: pid(), Type :: string(), PacketId :: string(), To :: string(), Packet :: string()) -> 'ok').
 send_iq(ConnectionPid, Type, PacketId, To, Packet) ->
   Packetizer = find_child(ConnectionPid, natter_packetizer),
-  Iq = build_iq_packet(Type, PacketId, To, Packet),
+  Iq = natter_util:build_iq_stanza(Type, PacketId, To, Packet),
   natter_packetizer:send(Packetizer, Iq).
 
 -spec(send_wait_iq/5 :: (ConnectionPid :: pid(), Type :: string(), PacketId :: string(),
@@ -122,7 +106,7 @@ send_wait_iq(ConnectionPid, Type, PacketId, To, Packet) when Type =:= "set";
 send_wait_iq(ConnectionPid, Type, PacketId, To, Packet, Timeout) when Type =:= "set";
                                                                       Type =:= "get" ->
   Dispatcher = find_child(ConnectionPid, natter_dispatcher),
-  Iq = build_iq_packet(Type, PacketId, To, Packet),
+  Iq = natter_util:build_iq_stanza(Type, PacketId, To, Packet),
   Result = natter_dispatcher:send_and_wait(Dispatcher, Iq, Timeout),
   case Result of
     {ok, {xmlelement, _, Attrs, _}} ->
@@ -153,23 +137,6 @@ find_child(ConnectionPid, natter_dispatcher) ->
 find_child(ConnectionPid, natter_packetizer) ->
   DispatcherPid = find_child(ConnectionPid, natter_dispatcher),
   natter_dispatcher:get_packetizer(DispatcherPid).
-
-build_iq_packet(Type, PacketId, To, Packet) ->
-  T = "<iq xml:lang='en' type='~s'",
-  {T1, D1} = case PacketId of
-                 "" ->
-                   {T, [Type]};
-                 _ ->
-                   {T ++ " id='~s'", [PacketId, Type]}
-               end,
-  {T2, D2} = case To of
-               "" ->
-                 {T1, D1};
-               _ ->
-                 {T1 ++ " to='~s'", [To|D1]}
-             end,
-  {T3, D3} = {T2 ++ ">~s</iq>", [Packet|D2]},
-  io_lib:format(T3, lists:reverse(D3)).
 
 build_child_specs(Config, InspectorMod, InspectorPid) ->
   CS1 = [{natter_dispatcher,

@@ -33,11 +33,13 @@
          config,
          packetizer,
          inspector_mod,
-         inspector}).
+         inspector,
+         state=normal,
+         auth_pid}).
 
 %% API
 -export([start_link/0, start_link/3, register_temporary_exchange/4, register_temporary_exchange/5, register_exchange/4]).
--export([unregister_exchange/3, dispatch/2, get_packetizer/1, send_and_wait/2, send_and_wait/3, clear/1]).
+-export([unregister_exchange/3, dispatch/2, get_packetizer/1, raw_send/2, send_and_wait/2, send_and_wait/3, clear/1]).
 
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
@@ -53,11 +55,23 @@ start_link(Config, InspectorMod, InspectorPid) ->
 
 -spec(clear/1 :: (ServerPid :: pid()) -> 'ok').
 clear(ServerPid) ->
-  gen_server:call(ServerPid, clear).
+  case gen_server:call(ServerPid, clear) of
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      clear(ServerPid);
+    V ->
+      V
+  end.
 
 -spec(register_exchange/4 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
 register_exchange(ServerPid, PacketType, TargetJid, ConsumerPid) ->
-  gen_server:call(ServerPid, {register_exchange, PacketType, TargetJid, ConsumerPid}).
+  case gen_server:call(ServerPid, {register_exchange, PacketType, TargetJid, ConsumerPid}) of
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      register_exchange(ServerPid, PacketType, TargetJid, ConsumerPid);
+    V ->
+      V
+  end.
 
 -spec(register_temporary_exchange/4 :: (ServerPid :: pid(), PacketType :: string(),
                                         TargetJid :: string() | 'default', ConsumerPid :: pid()) -> 'ok' | {'error', string()}).
@@ -67,19 +81,53 @@ register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid) ->
 -spec(register_temporary_exchange/5 :: (ServerPid :: pid(), PacketType :: string(),
                                         TargetJid :: string() | 'default', ConsumerPid :: pid(), ExchangeTimeout :: integer()) -> 'ok' | {'error', string()}).
 register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid, ExchangeTimeout) ->
-  gen_server:call(ServerPid, {register_temp_exchange, PacketType, TargetJid, ConsumerPid, ExchangeTimeout}).
+  case gen_server:call(ServerPid, {register_temp_exchange, PacketType, TargetJid, ConsumerPid, ExchangeTimeout}) of
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      register_temporary_exchange(ServerPid, PacketType, TargetJid, ConsumerPid, ExchangeTimeout);
+    V ->
+      V
+  end.
 
 -spec(unregister_exchange/3 :: (ServerPid :: pid(), PacketType :: string(), TargetJid :: string() | 'default') -> 'ok').
 unregister_exchange(ServerPid, PacketType, TargetJid) ->
-  gen_server:call(ServerPid, {unregister_exchange, PacketType, TargetJid, self()}).
+  case gen_server:call(ServerPid, {unregister_exchange, PacketType, TargetJid, self()}) of
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      unregister_exchange(ServerPid, PacketType, TargetJid);
+    V ->
+      V
+  end.
 
 -spec(get_packetizer/1 :: (ServerPid :: pid()) -> {ok, pid()}).
 get_packetizer(ServerPid) ->
-  gen_server:call(ServerPid, get_packetizer).
+  case gen_server:call(ServerPid, get_packetizer) of
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      get_packetizer(ServerPid);
+    V ->
+      V
+  end.
 
 -spec(dispatch/2 :: (ServerPid :: pid(), Stanza :: string()) -> any()).
 dispatch(ServerPid, Stanza) ->
-  gen_server:cast(ServerPid, {dispatch, natter_parser:parse(Stanza)}).
+  case gen_server:cast(ServerPid, {dispatch, natter_parser:parse(Stanza)}) of
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      dispatch(ServerPid, Stanza);
+    V ->
+      V
+  end.
+
+-spec(raw_send/2 :: (ServerPid :: pid(), Data :: string()) -> any()).
+raw_send(ServerPid, Data) ->
+  case gen_server:call(ServerPid, {raw_send, Data}) of
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      raw_send(ServerPid, Data);
+    V ->
+      V
+  end.
 
 -spec(send_and_wait/2 :: (ServerPid :: pid(), Stanza :: tuple() | string() ) -> {'ok', parsed_xml()} | {'error', 'timeout'}).
 send_and_wait(ServerPid, Stanza) ->
@@ -94,22 +142,11 @@ send_and_wait(ServerPid, {xmlelement, PacketType, Attrs, _} = Stanza, Timeout) -
     {error, already_registered} ->
       timer:sleep(100),
       send_and_wait(ServerPid, Stanza, Timeout);
+    {wait, reconnecting} ->
+      reconnect_wait(),
+      send_and_wait(ServerPid, Stanza, Timeout);
     ok ->
-      gen_server:call(ServerPid, {send, Stanza}),
-      if
-        Timeout > 0 ->
-          receive
-            {packet, Reply} ->
-              {ok, Reply}
-          after Timeout ->
-              {error, timeout}
-          end;
-        true ->
-          receive
-            {packet, Reply} ->
-              {ok, Reply}
-          end
-      end
+      send_with_timeout(ServerPid, Stanza, Timeout)
   end.
 %%====================================================================
 %% gen_server callbacks
@@ -127,7 +164,12 @@ init([Config, InspectorMod, InspectorPid]) ->
     true ->
       link(InspectorPid)
   end,
+  authenticate(Config),
   {ok, #state{packetizer=P, config=Config, inspector_mod=InspectorMod, inspector=InspectorPid}}.
+
+handle_call(_, {SenderPid, _}, State) when State#state.state =:= auth,
+                                           (State#state.auth_pid =:= SenderPid) == false ->
+  {reply, {wait, reconnecting}, State};
 
 handle_call(clear, _From, _State) ->
   {reply, ok, #state{}};
@@ -140,6 +182,15 @@ handle_call({send, Stanza}, _From, State) ->
                timer:apply_after(250, natter_dispatcher, dispatch, [self(), FinalStanza]);
              _ ->
                natter_packetizer:send(State#state.packetizer, FinalStanza)
+           end,
+  {reply, Result, State};
+
+handle_call({raw_send, Data}, _From, State) ->
+  Result = case State#state.packetizer of
+             undefined ->
+               ok;
+             _ ->
+               natter_packetizer:send(State#state.packetizer, Data)
            end,
   {reply, Result, State};
 
@@ -205,6 +256,19 @@ handle_cast({redispatch, Stanza}, State) ->
 handle_cast(_Msg, State) ->
   {noreply, State}.
 
+handle_info(reconnected, State) ->
+  NewState = if
+               State#state.state =:= auth ->
+                 State;
+               true ->
+                 authenticate(State#state.config),
+                 State#state{state=auth}
+             end,
+  {noreply, NewState};
+
+handle_info({auth_pid, AuthPid}, State) ->
+  {noreply, State#state{auth_pid=AuthPid, state=auth}};
+
 handle_info({temp_exchange_timeout, Key, ConsumerPid}, State) ->
   NewState = case dict:find(Key, State#state.temp_routes) of
                error ->
@@ -214,6 +278,15 @@ handle_info({temp_exchange_timeout, Key, ConsumerPid}, State) ->
                  State#state{temp_routes=dict:store(Key, FilteredPids, State#state.temp_routes)}
              end,
   {noreply, NewState};
+
+handle_info({auth, ok}, State) ->
+  {noreply, State#state{state=normal, auth_pid=undefined}};
+
+handle_info({auth, err}, State) ->
+  {stop, {error, {auth, err}}, State};
+
+handle_info({auth, fatal, Reason}, State) ->
+  {stop, {error, {auth, fatal, Reason}}, State};
 
 handle_info(_Info, State) ->
   {noreply, State}.
@@ -231,6 +304,37 @@ code_change(_OldVsn, State, _Extra) ->
   {ok, State}.
 
 %% Internal functions
+send_with_timeout(ServerPid, Stanza, Timeout) ->
+  gen_server:call(ServerPid, {send, Stanza}),
+  if
+    Timeout > 0 ->
+      receive
+        {wait, reconnecting} ->
+          reconnect_wait(),
+          send_with_timeout(ServerPid, Stanza, Timeout);
+        {packet, Reply} ->
+          {ok, Reply}
+      after Timeout ->
+          {error, timeout}
+      end;
+    true ->
+      receive
+        {wait, reconnecting} ->
+          reconnect_wait(),
+          send_with_timeout(ServerPid, Stanza, Timeout);
+        {packet, Reply} ->
+          {ok, Reply}
+      end
+  end.
+
+
+reconnect_wait() ->
+  timer:sleep(random:uniform(200)).
+
+authenticate(Config) ->
+  Server = self(),
+  timer:apply_after(100, natter_auth, start_link, [Server, Server, Config]).
+
 send_with_delay(DispatcherPid, Stanza, DelaySeconds) ->
   timer:sleep(DelaySeconds * 1000),
   gen_server:cast(DispatcherPid, {redispatch, Stanza}).
@@ -256,24 +360,6 @@ route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
                                        natter_parser:element_to_string(Stanza)]),
       S
   end.
-
-%% route_message({xmlelement, PacketType, Attrs, _}=Stanza, State) ->
-%%   RouteId = case is_error(Attrs) of
-%%               true ->
-%%                 "error";
-%%               false ->
-%%                 extract_routable_jid("from", Attrs)
-%%             end,
-%%   case find_target(PacketType, RouteId, State) of
-%%     {{ok, Routes}, S} ->
-%%       lists:foreach(fun(R) -> R ! {packet, Stanza} end, Routes),
-%%       S;
-%%     {error, S} ->
-%%       natter_logger:log(?FILE, ?LINE, ["Ignoring unroutable packet: ",
-%%                                        natter_parser:element_to_string(Stanza)]),
-%%       S
-%%   end.
-
 
 evaluate_inbound_stanza(_Stanza, undefined, undefined) ->
   route;
