@@ -165,7 +165,7 @@ init([Config, InspectorMod, InspectorPid]) ->
       link(InspectorPid)
   end,
   authenticate(Config),
-  {ok, #state{packetizer=P, config=Config, inspector_mod=InspectorMod, inspector=InspectorPid}}.
+  {ok, #state{packetizer=P, state=auth, config=Config, inspector_mod=InspectorMod, inspector=InspectorPid}}.
 
 handle_call(_, {SenderPid, _}, State) when State#state.state =:= auth,
                                            (State#state.auth_pid =:= SenderPid) == false ->
