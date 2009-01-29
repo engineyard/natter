@@ -41,6 +41,8 @@
 -export([start_link/0, start_link/3, register_temporary_exchange/4, register_temporary_exchange/5, register_exchange/4]).
 -export([unregister_exchange/3, dispatch/2, get_packetizer/1, raw_send/2, send_and_wait/2, send_and_wait/3, clear/1]).
 
+-export([simulate_auth/1, ping/1]).
+
 %% gen_server callbacks
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
@@ -52,6 +54,13 @@ start_link() ->
 -spec(start_link/3 :: (Config :: config(), InspectorMod :: atom(), InspectorPid :: pid()) -> {'ok', pid()}).
 start_link(Config, InspectorMod, InspectorPid) ->
   gen_server:start_link(?MODULE, [Config, InspectorMod, InspectorPid], []).
+
+%% For unit testing only
+simulate_auth(ServerPid) ->
+  gen_server:call(ServerPid, simulate_auth).
+
+ping(ServerPid) ->
+  gen_server:call(ServerPid, ping).
 
 -spec(clear/1 :: (ServerPid :: pid()) -> 'ok').
 clear(ServerPid) ->
@@ -170,6 +179,12 @@ init([Config, InspectorMod, InspectorPid]) ->
 handle_call(_, {SenderPid, _}, State) when State#state.state =:= auth,
                                            (State#state.auth_pid =:= SenderPid) == false ->
   {reply, {wait, reconnecting}, State};
+
+handle_call(ping, _From, State) ->
+  {reply, pong, State};
+
+handle_call(simulate_auth, _From, State) ->
+  {reply, ok, State#state{state=auth}};
 
 handle_call(clear, _From, _State) ->
   {reply, ok, #state{}};

@@ -122,6 +122,14 @@ timeout_routing_test_() ->
              throw({error, timeout})
          end end]}].
 
+blocking_auth_test_() ->
+  [{setup, fun start_dispatcher/0,
+    fun stop_dispatcher/1,
+    [fun() ->
+         pong = natter_dispatcher:ping(natterd),
+         natter_dispatcher:simulate_auth(natterd),
+         {wait, reconnecting} = natter_dispatcher:ping(natterd) end]}].
+
 start_dispatcher() ->
   {ok, Pid} = natter_dispatcher:start_link(),
   register(natterd, Pid),
