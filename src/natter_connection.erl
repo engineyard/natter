@@ -107,19 +107,7 @@ send_wait_iq(ConnectionPid, Type, PacketId, To, Packet, Timeout) when Type =:= "
                                                                       Type =:= "get" ->
   Dispatcher = find_child(ConnectionPid, natter_dispatcher),
   Iq = natter_util:build_iq_stanza(Type, PacketId, To, Packet),
-  Result = natter_dispatcher:send_and_wait(Dispatcher, Iq, Timeout),
-  case Result of
-    {ok, {xmlelement, _, Attrs, _}} ->
-      case proplists:get_value("type", Attrs) of
-        ResultType when ResultType =:= "error" orelse ResultType =:= "result" ->
-          Result;
-        _ ->
-          {ok, R} = Result,
-          {error, {illegal_xmpp_reply, R}}
-      end;
-    Err ->
-      Err
-  end.
+  natter_dispatcher:send_and_wait(Dispatcher, Iq, Timeout).
 
 init([Config, InspectorMod, InspectorPid]) ->
   {ok, {{one_for_all, 5, 60}, build_child_specs(Config, InspectorMod, InspectorPid)}}.

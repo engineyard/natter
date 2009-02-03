@@ -262,7 +262,10 @@ handle_cast({dispatch, Stanza}, State) ->
       {noreply, State};
     {Action, DelaySeconds} when Action =:= delay ->
       spawn(fun() -> send_with_delay(ServerPid, Stanza, DelaySeconds) end),
-      {noreply, State}
+      {noreply, State};
+    {Action, RepeatSeconds} when Action =:= repeat ->
+      spawn(fun() -> send_with_delay(ServerPid, Stanza, RepeatSeconds) end),
+      {noreply, route_message(Stanza, State)}
   end;
 
 handle_cast({redispatch, Stanza}, State) ->
