@@ -4,7 +4,7 @@
 AC_PREREQ(2.61)
 
 # Intialization
-AC_INIT(natter, 0.2.0)
+AC_INIT(natter, 0.3.0)
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 ifdef([LT_INIT], [LT_INIT], [AC_PROG_LIBTOOL])
 AC_SUBST([LIBTOOL_DEPS])
