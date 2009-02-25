@@ -24,9 +24,3 @@ ERLCFLAGS = @ERLCFLAGS@ +warn_obsolete_guard +warn_unused_import \
 
 ../ebin/%.beam: %.erl
 	$(ERLC) $(ERLCFLAGS) -b beam -o ../ebin $<
-
-../priv/lib:
-	mkdir -p ../priv/lib
-
-all-local: ../priv/lib
-	cp .libs/natter_expat.so ../priv/lib
