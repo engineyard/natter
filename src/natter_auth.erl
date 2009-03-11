@@ -72,7 +72,7 @@ handle_info({packet, {xmlelement, "stream:stream", _, _}}, State) ->
           State#state.owner ! {auth, err}
       end;
     Error ->
-      io:foramt("Send and wait returned: ~p~n", [Error]),
+      io:format("Send and wait returned: ~p~n", [Error]),
       State#state.owner ! {auth, fatal, {Error}}
   end,
   {stop, normal, State};
