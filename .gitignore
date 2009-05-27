@@ -16,3 +16,4 @@ missing
 *.beam
 .DS_Store
 .*.swp
+*~
