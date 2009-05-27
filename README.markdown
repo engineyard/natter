@@ -13,18 +13,18 @@ make
 sudo make install
 </pre>
 
-This will install natter at: _/usr/local/lib/erlang/lib/_
+This will install natter at: __/usr/local/lib/erlang/lib/__
 
 ## If you are using Ubuntu and installed erlang via apt-get:
 
 <pre>
 autoreconf --install
-./configure --prefix=/usr
+./configure --prefix=/usr/
 make
 sudo make install
 </pre>
 
-This will install natter at: _/usr/lib/erlang/lib/_
+This will install natter at: __/usr/lib/erlang/lib/__
 
 # Getting Started
 
@@ -60,8 +60,11 @@ natter_connection:register_exchange(Cn, "iq", "bar@localhost", self()).
 # Internals
 
 3 main modules:
+
 * __natter_connection__: public API. Runs as a supervisor.
+
 * __natter_packetizer__: responsible for dealing with all network traffic. Reads in incoming XML and finds out when you have a complete packet. It then sends the packet to the dispatcher.
+
 * __natter_dispatcher__: figures out where packets should go.
 
 XML Parsing is done using an erlang wrapper around libexpat. Inspired by Jabberlang. Faster than xmerl.
@@ -73,10 +76,14 @@ XML is parsed into a tuple:
 
 # TODO
 
--Move away from plain-text authentication
--Support for presence
--Support for message stanzas
--Support for rosters
+* Move away from plain-text authentication
+
+* Support for presence
+
+* Support for message stanzas
+
+* Support for rosters
+
 
 # Resources/Links
 
